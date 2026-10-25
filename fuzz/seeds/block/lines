@@ -1,0 +1,4 @@
+type:: person
+born:: 1970-01-01
+author:: [[Jane#type(person)]]
+tags:: [a, "b, c", [[D]]]

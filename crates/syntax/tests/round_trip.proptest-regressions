@@ -1,0 +1,12 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c7b8d7a46e77919676648e289b69b62b4d61c4cec49dd1b686df1b5673d51cbe # shrinks to key = "0", value = Some(List([Link(Link { name: "0", qualifiers: [] })]))
+cc 473745af7e8c770c407acf2690d8eb2928616da2bf3429fc66f930634fcb1ae8 # shrinks to key = "ߺ", value = Some(List([Link(Link { name: "\0", qualifiers: [] })]))
+cc edd9beb4f32be228c221fd9f98329fd4982d411477ecce25edd09568afc13517 # shrinks to lines = [Property("ꩄ", Some(List([Link(Link { name: "\u{e}", qualifiers: [] })])))], tight = false
+cc 031a272b5021b88b534f57567366ee915022d3f04075d0d1f184618da8f3d8cd # shrinks to key = "a", value = Some(List([Link(Link { name: "\\", qualifiers: [] })]))
+cc 8107badef876bbb6ef8e6fd142092e89a3d864cadbc3510deb2c20c8acd0df54 # shrinks to key = "ၵ", value = Some(Link(Link { name: "\0", qualifiers: [Qualifier { key: "\0", value: Some(List([Link(Link { name: "¡", qualifiers: [Qualifier { key: "\\", value: Some(List([Text(":[[))")])) }] })])) }] }))
+cc d4e24d804bd024d3830cbadb24f89f18564920f9ff3971d7e6ff92f363b06e9d # shrinks to lines = [Property("ꚠ", Some(Text(" ")))], tight = false

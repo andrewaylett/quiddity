@@ -27,3 +27,29 @@ jobs:
       - run: cargo doc --no-deps --locked
         env:
           RUSTDOCFLAGS: -D warnings
+
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [block, outline]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - run: mkdir -p fuzz/corpus/${{ matrix.target }}
+      - run: >-
+          cargo fuzz run ${{ matrix.target }}
+          fuzz/corpus/${{ matrix.target }} fuzz/seeds/${{ matrix.target }}
+          -- -max_total_time=60
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: fuzz/artifacts/

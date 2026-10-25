@@ -48,18 +48,23 @@ pub fn format_link(link: &Link) -> String {
         .iter()
         .map(|q| format_inline_property(&q.key, q.value.as_ref()))
         .collect();
-    let plain = format!("[[{}{qualifiers}]]", link.name);
-    if parse_block(&plain).links.first() == Some(link) {
-        return plain;
-    }
-    let mut escaped = String::new();
-    for c in link.name.chars() {
-        if matches!(c, '\\' | '[' | ']' | '#') {
-            escaped.push('\\');
+    let mut name = String::new();
+    let mut chars = link.name.chars().peekable();
+    while let Some(c) = chars.next() {
+        // Escape what could end the name early or start a qualifier, so the
+        // link reads back the same wherever it appears.
+        let next = chars.peek().copied();
+        let special = match c {
+            '\\' | '[' | ']' => true,
+            '#' => next.is_some_and(|n| n == '[' || n.is_alphanumeric() || n == '_'),
+            _ => false,
+        };
+        if special {
+            name.push('\\');
         }
-        escaped.push(c);
+        name.push(c);
     }
-    format!("[[{escaped}{qualifiers}]]")
+    format!("[[{name}{qualifiers}]]")
 }
 
 fn format_in(value: &Value, ctx: Context) -> String {
@@ -72,15 +77,25 @@ fn format_in(value: &Value, ctx: Context) -> String {
                 .iter()
                 .map(|v| format_in(v, Context::ListItem))
                 .collect();
-            format!("[{}]", items.join(", "))
+            let items = items.join(", ");
+            // `[[[` would read as a link, so separate a leading `[`.
+            let gap = if items.starts_with('[') { " " } else { "" };
+            format!("[{gap}{items}]")
         }
     }
 }
 
 /// Writes text as it is if it would parse back unchanged, otherwise quoted.
+///
+/// Inside `(…)` or `[…]`, an unquoted `[[` or `((` could pair up with a
+/// `]]` or `))` beyond the value, so text containing them is always quoted
+/// there: whether it reads back can't be judged from the value alone.
 fn format_text(s: &str, ctx: Context) -> String {
+    let nested = !matches!(ctx, Context::Line);
     let as_is = !s.is_empty()
+        && s.trim() == s
         && !s.contains(['\n', '\r'])
+        && !(nested && (s.contains("[[") || s.contains("((")))
         && reparse(s, ctx).is_some_and(|v| v == Value::Text(s.to_owned()));
     if as_is {
         return s.to_owned();
@@ -122,82 +137,13 @@ fn single_inline_value(src: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::{Qualifier, parse_property_line};
 
     fn text(s: &str) -> Value {
         Value::Text(s.to_owned())
     }
 
-    fn samples() -> Vec<Value> {
-        let jane = Link {
-            name: "Jane".into(),
-            qualifiers: vec![Qualifier {
-                key: "type".into(),
-                value: Some(text("person")),
-            }],
-        };
-        vec![
-            text("plain"),
-            text("with spaces"),
-            text(""),
-            text("  padded "),
-            text("a, b"),
-            text("a)b"),
-            text("a]b"),
-            text("[not a list]"),
-            text("\"quoted\""),
-            text(r"back\slash"),
-            text("multi\nline"),
-            text("[[looks like a link]]"),
-            text("#hash"),
-            Value::Link(jane.clone()),
-            Value::Link(Link {
-                name: "odd]]name#x".into(),
-                qualifiers: vec![],
-            }),
-            Value::Link(Link {
-                name: "Book".into(),
-                qualifiers: vec![Qualifier {
-                    key: "author".into(),
-                    value: Some(Value::Link(jane)),
-                }],
-            }),
-            Value::BlockRef("0198f0c4".into()),
-            Value::List(vec![
-                text("a"),
-                text("b, c"),
-                text(""),
-                Value::BlockRef("x".into()),
-            ]),
-            Value::List(vec![]),
-        ]
-    }
-
-    #[test]
-    fn inline_round_trip() {
-        for value in samples() {
-            for key in ["k", "due date"] {
-                let src = format_inline_property(key, Some(&value));
-                let block = parse_block(&src);
-                assert_eq!(block.properties.len(), 1, "{src}");
-                assert_eq!(block.properties[0].key, key, "{src}");
-                assert_eq!(block.properties[0].value.as_ref(), Some(&value), "{src}");
-            }
-        }
-    }
-
-    #[test]
-    fn line_round_trip() {
-        for value in samples() {
-            let line = format_property_line("k", Some(&value));
-            assert_eq!(
-                parse_property_line(&line),
-                Some(("k".into(), Some(value.clone()))),
-                "{line}"
-            );
-        }
-    }
-
+    // Round trips are property-tested in tests/round_trip.rs; these pin down
+    // that the output stays readable rather than defensively quoted.
     #[test]
     fn readable_where_possible() {
         assert_eq!(
@@ -216,6 +162,15 @@ mod tests {
         assert_eq!(
             format_inline_property("tags", Some(&Value::List(vec![text("a, b"), text("c")]))),
             "#tags([\"a, b\", c])"
+        );
+        let jane = Value::Link(Link {
+            name: "Jane".into(),
+            qualifiers: vec![],
+        });
+        assert_eq!(
+            format_inline_property("with", Some(&Value::List(vec![jane]))),
+            "#with([ [[Jane]]])",
+            "a space keeps `[[[` from reading as a link"
         );
         assert_eq!(
             format_link(&Link {
