@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/andrewaylett/quiddity"
+rust-version = "1.88"
+
+[workspace.dependencies]
+quiddity-syntax = { path = "crates/syntax" }
+jiff = "0.2"
+loro = "1.17"
+tempfile = "3"
+thiserror = "2"
+uuid = { version = "1", features = ["v7"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
