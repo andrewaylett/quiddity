@@ -107,7 +107,7 @@ pub fn format_outline(outline: &Outline) -> String {
         out.push('\n');
     }
     if let Some(props) = &outline.properties {
-        for line in props.lines() {
+        for line in props.split('\n') {
             out.push_str(line);
             out.push('\n');
         }
@@ -168,7 +168,12 @@ impl Pending {
 }
 
 pub fn parse_outline(src: &str, indent: Indent) -> Outline {
-    let lines: Vec<&str> = src.lines().collect();
+    // Quiddity's own files keep a `\r` that is part of a block's text;
+    // anything else may have Windows line endings.
+    let lines: Vec<&str> = match indent {
+        Indent::Tabs => src.strip_suffix('\n').unwrap_or(src).split('\n').collect(),
+        Indent::Auto => src.lines().collect(),
+    };
     let first_bullet = lines
         .iter()
         .position(|l| bullet(l, indent).is_some())
