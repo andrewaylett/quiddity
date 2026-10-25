@@ -63,21 +63,22 @@ typed binaries.
   the user, not a dumb relay. That lets it keep full history and serve devices
   that have been offline for a long time.
 
-Suggested repository layout (pnpm workspace plus Cargo workspace):
+Repository layout (Cargo workspace now; pnpm workspace once there is UI):
 
 ```
-crates/core      graph model, storage, sync protocol, import/export
-crates/node      headless sync node binary
+crates/syntax    block Markdown syntax: properties, links, block refs
+crates/core      graph model, index, journals, text import/export
+crates/node      headless sync node binary (next)
 crates/cli       import/export/fsck tooling (later)
-apps/app         Tauri 2 shell
-apps/ui          Next.js UI (static export)
-packages/model   TypeScript model types + Markdown parser/serialiser
+apps/app         Tauri 2 shell (later)
+apps/ui          Next.js UI, static export (later)
 docs/
 ```
 
-The Markdown parser and serialiser are needed on both sides: TypeScript for the
-editor, Rust for import, export and indexing. One of them has to be the
-reference implementation, tested against a shared corpus of examples.
+The Markdown syntax is needed on both sides: Rust for indexing, import and
+export, and TypeScript for the editor. `crates/syntax` is the reference
+implementation. The UI will use it compiled to WASM rather than keeping a
+second parser in step.
 
 ## Data model
 
@@ -85,130 +86,140 @@ reference implementation, tested against a shared corpus of examples.
 
 The block is the unit of everything. Each block has:
 
-| Field      | Storage                                 | Notes                                      |
-|------------|-----------------------------------------|--------------------------------------------|
-| id         | `LoroTree` node ID                      | stable, unique, the primary key            |
-| parent     | the tree structure                      | `null` for roots                           |
-| order      | the tree's fractional index             | concurrent moves can't create cycles       |
-| text       | `LoroText` holding Markdown             | merges character by character              |
-| properties | `LoroMap` (see below)                   | typed and schema-described                 |
+| Field  | Storage                     | Notes                                     |
+|--------|-----------------------------|-------------------------------------------|
+| id     | `LoroTree` node ID          | stable and unique, but internal to a graph |
+| parent | the tree structure          | none for roots                            |
+| order  | the tree's fractional index | concurrent moves can't create cycles      |
+| text   | `LoroText` holding Markdown | merges character by character             |
 
 All blocks live in one `LoroTree` inside one Loro document per graph. A move
 between entities is then just a tree move, and Loro handles concurrent moves
 for us, cycles included.
 
-A block's **type** is the value of the well-known `type` property.
+**The Markdown text is the source of truth for properties.** Nothing about a
+block's properties is stored outside its text. Properties, links and
+backlinks are all derived by parsing, and that derived state lives in an
+index that can be rebuilt at any time and is never synced. The upshots:
 
-### The meta-schema (bootstrap)
-
-Property keys are blocks, and so are types. A handful of blocks have fixed,
-well-known IDs and are created identically on every device. That way two
-devices bootstrapping a graph converge instead of creating duplicates:
-
-- `type`: the property that gives a block's type
-- `name`: the property that gives a display name
-- `property`: the type of property-key blocks
-- `entity`, `journal`, `class`, …: built-in types
-- the schema properties used by property-key blocks: `value-type`, `form`,
-  `cardinality`, `alias`, …
-
-Since a Loro tree node ID can't be chosen up front, these blocks are created
-from a fixed **genesis snapshot** that ships with the app. Every graph starts
-from that same snapshot.
+- Export and import are lossless with no special cases.
+- A property edit is a text edit, so it merges character by character like
+  any other. Two devices changing the same value concurrently can therefore
+  produce a merged string rather than one winner. With one user on several
+  devices that's rare, and the result is visible and fixable, rather than
+  silently dropping one side.
+- The schema can't reject anything. Values that don't fit it are flagged.
 
 ### Properties
 
-A block's properties are a `LoroMap` from property-key block ID to a list of
-**instances**:
+Properties are written in two ways, both parsed from the text:
 
-```
-properties: LoroMap<keyId, LoroList<Instance>>
-Instance:   { id, value: Value }            // scalar form
-          | { id, items: LoroMovableList<Value> }  // list form
-```
+- **Property lines**, as in Logseq's original format: `key:: value` on a line
+  of its own. A key starts with a letter, digit or underscore, may contain
+  spaces, and may not contain `:`, `#`, brackets or parentheses.
+- **Inline properties**, anywhere in running text: `#key` or `#key(value)`.
 
-That gives us the two shapes you asked for:
+A block's **type** is the value of its `type` property.
 
-- **Many instances** of a property: several entries in the instance list. Each
-  has its own ID, so concurrent additions both survive.
-- **One instance holding an ordered list**: a single instance in list form. Its
-  items are a movable list, so they can be reordered concurrently.
+The two shapes of multiple values are distinguished explicitly:
 
-Each property-key block (type `property`) carries its own schema:
+| Written                          | Meaning                                   |
+|----------------------------------|-------------------------------------------|
+| `#tag(a) #tag(b)`, or two `tag::` lines | two instances of `tag`, one value each |
+| `#steps([a, b, c])`, `steps:: [a, b, c]` | one instance holding an ordered list |
 
-| Schema property | Values                                                     |
-|-----------------|------------------------------------------------------------|
-| `value-type`    | `string`, `number`, `boolean`, `date`, `datetime`, `ref`, `blob`, … |
-| `form`          | `scalar` or `list`                                         |
-| `cardinality`   | `one` or `many`                                            |
-| `ref-type`      | for `ref`: restricts which types a reference may point at  |
+Lists are always written with brackets, and don't nest. In a property line a
+comma means nothing special: `note:: a, b` is the text "a, b".
 
-The schema is advisory. Data that doesn't match it, whether from concurrent
-edits, imports or schema changes, is kept and flagged in the UI, never
-silently dropped. A property with cardinality `one` that ends up with two
-instances (from two devices editing concurrently) shows the instance with the
-lowest ID and offers a choice.
+**Property names are unique.** A property key is an entity of type
+`property` whose name is the key. If two devices create the same property
+entity concurrently, the duplicates are merged like journals (below). Each
+property entity can describe its values:
+
+| Schema property | Values                                                       |
+|-----------------|--------------------------------------------------------------|
+| `value-type`    | `text`, `number`, `boolean`, `date`, `datetime`, `ref` (more later, e.g. `blob`) |
+| `form`          | `scalar` or `list`                                           |
+| `cardinality`   | `one` or `many`                                              |
+
+A property with no entity, or one whose entity doesn't say, is untyped text,
+scalar, any number of instances. Quiddity's own properties (`type`, `alias`,
+`date`, `id`, `title`, and the three above) have built-in schemas, so no
+bootstrap blocks or genesis snapshot are needed. Because names are unique,
+a built-in is found by its name alone. A property entity for one of them is
+optional and only adds documentation.
 
 ### Values
 
-Values are tagged so that new types can be added later:
+At the syntax level a value is one of:
 
-```
-{ t: "str",  v: string }
-{ t: "num",  v: number }            // IEEE-754 double; `dec` (decimal string) later if needed
-{ t: "bool", v: boolean }
-{ t: "date", v: "2026-10-25" }      // ISO 8601 calendar date, no time zone
-{ t: "dt",   v: "2026-10-25T21:04:00+01:00" }  // RFC 3339, offset kept
-{ t: "ref",  v: blockId }
-{ t: "blob", v: { hash, mime, size, name? } }
-```
+- **text**: written bare, or `"quoted"` when it contains delimiters
+- **a link**: `[[Name#qualifier(value)]]`
+- **a block reference**: `((id))`
+- **a list** of the above: `[a, "b, c", [[D]]]`
 
-A client that meets a tag it doesn't know keeps the value and passes it along
-as it is, showing it as an opaque value rather than discarding it.
+The property's schema then reads it as text, a number (an IEEE-754 double), a
+boolean (`true`/`false`/`yes`/`no`), a date (ISO 8601 calendar date), a
+datetime (RFC 3339, offset required) or a reference. For a `ref` property,
+bare text is a name, so `type:: person` means `type:: [[person]]`.
 
-References in property values are stored by **ID**. References in **text** are
-by name (below). On export, ID references are written in the textual form.
+Escapes: `\` before any of `\ ( ) [ ] , " #` makes it literal. Any other
+backslash is literal, so `path:: C:\Users` reads as written. Quoted strings
+also accept `\n` for a newline.
 
 ### Entities
 
-An entity is the equivalent of a Logseq or Roam page: a block whose `type`
-includes `entity`, or a subtype of it. Its children are the page body.
+An entity is the equivalent of a Logseq or Roam page: **a root block**. Its
+text is its name and its children are the page body. If the first child
+consists only of `key:: value` lines, it is the entity's **properties block**
+and holds the entity's own properties. This mirrors the properties block at
+the top of a Logseq page.
+
+```
+Jane                         ← root block: the name
+├─ type:: person             ← properties block
+│  born:: 1970-01-01
+├─ Met at [[Summit]]         ← body
+│  └─ …
+```
 
 - **Names are not unique.** An entity is identified by its name together with
-  its other properties.
-- **Renaming** keeps the old name as an `alias` instance, so links written
+  its properties.
+- **Renaming** keeps the old name as an `alias` value, so links written
   against the old name (including by a device that was offline) still resolve.
-- **Duplicates.** If two devices concurrently create entities whose
-  identifying properties are equal, both survive replication. For types whose
-  identity is fully determined by their properties, such as journals, we merge
-  deterministically: the lowest ID wins, the loser's children move under the
-  winner, its properties are unioned and the loser is deleted. Every device
-  applies the same rule, so concurrent merges converge. For anything else the
-  UI offers the merge.
+- **Duplicates.** Some entities are fully identified by their properties:
+  journals (type and date) and property keys (type and name). When two
+  devices create the same one concurrently, the copy with the lowest ID is
+  kept and the content of the others moves into it. The others are **not
+  deleted**, because a device that hasn't yet synced may still be adding to
+  its copy, and anything added under a deleted block is lost. Instead the
+  index hides them, and the merge runs after every sync, moving anything new
+  across. Every device makes the same moves, so concurrent merges converge.
+  For other entities with the same name, the UI offers to merge.
 
 ### Journals and dates
 
-A journal page is an entity of type `journal` with a single `date` property:
-`#type(journal)#date(2026-10-25)`. Type plus date identifies it fully, so
-journal duplicates are merged automatically as described above.
+A journal page is an entity named for its date, with a properties block of
+`type:: journal` and `date:: 2026-10-25`.
 
 ### Block text and link syntax
 
-Block text is canonically **Markdown**, stored in a `LoroText` and merged
-character by character.
+| Syntax                                     | Meaning                                          |
+|--------------------------------------------|--------------------------------------------------|
+| `key:: value`                              | a property, on its own line                      |
+| `#tag`                                     | property `tag` with no value (a plain tag)       |
+| `#prop(value)`                             | one instance of `prop` with `value`              |
+| `#prop([a, b])`                            | one instance holding a list                      |
+| `#[[Multi word]](value)`                   | a property whose name contains spaces            |
+| `[[Name]]`                                 | link to an entity called `Name`                  |
+| `[[Name#type(person)#born(1970-01-01)]]`   | link narrowed by the target's properties         |
+| `#author([[Jane#type(person)]])`           | a reference value, by name                       |
+| `((id))`                                   | reference to the block with that `id` property   |
 
-Properties are written `#prop(value)`. Following from that:
-
-| Syntax                                     | Meaning                                                 |
-|--------------------------------------------|---------------------------------------------------------|
-| `#tag`                                     | property `tag` present with no value (a plain tag)       |
-| `#prop(value)`                             | one instance of `prop` with `value`                     |
-| `#prop(a)#prop(b)`                         | two instances                                           |
-| `#[[Multi word]](value)`                   | a property key whose name contains spaces                |
-| `[[Name]]`                                 | link to the entity called `Name`                         |
-| `[[Name#type(person)#born(1970-01-01)]]`   | link narrowed by properties                              |
-| `#author([[Jane#type(person)]])`           | a reference value written by name                        |
-| `((blockId))`                              | reference to a non-entity block by ID                    |
+A qualifier `#key(value)` in a link matches an entity with an instance of
+`key` whose value is equal to `value` (or contains it, for a list). A bare
+`#key` matches an entity with any instance of `key`. Names, and values being
+compared, ignore case and repeated whitespace.
 
 Links in text are **resolved when followed**, not when written:
 
@@ -218,22 +229,33 @@ Links in text are **resolved when followed**, not when written:
 - No match: offer to create the entity, taking its initial properties from the
   link.
 
-The backlink index stores what each link resolves to and is re-resolved
-whenever a name, alias or identifying property changes.
+The index records what each link resolves to, so backlinks include ambiguous
+links (marked as such).
 
-Lexing rules to settle:
+**Block references.** Block IDs are internal to a graph and don't survive
+export and import. A block that something refers to gets an `id:: <uuid>`
+property line, added when it's first referred to (as Logseq does), and
+`((uuid))` resolves through that property.
 
-- `#` must begin a word (`# Heading`, `foo#bar` and URL fragments are not
-  tags). Code spans and code blocks are opaque.
-- Should all-digit tags (`#123`) and hex colours (`#fff`) be tags? Both Logseq
-  and Obsidian have rules for this; we should copy whichever is least
-  surprising.
-- Escaping: `\)` and `\#` inside values. Strings may also be quoted (`"…"`).
+Lexing rules:
+
+- `#` starts a property only at the start of a line, after whitespace or
+  `(`, or straight after another inline property (so `#a(1)#b(2)` is two).
+  `# Heading`, `foo#bar` and URL fragments are not properties.
+- All-digit keys (`#123`) are not properties, so issue numbers stay as text.
+  `#fff` is a property; we can live with that.
+- A trailing full stop isn't part of a bare key: `see #todo.` is `todo`.
+- Code spans and fenced code blocks are opaque.
+- Inside a link, `#` followed by a key starts a qualifier. Write `\#` for a
+  literal one. `[[C# notes]]` is fine as it is.
+- Anything malformed is plain text. Parsing never fails.
 
 ### Binaries
 
-A binary is a `blob` value: a BLAKE3 hash plus MIME type, size and an optional
-file name. The bytes live in the iroh-blobs store, not in the Loro document.
+A binary is referenced from text by content hash, in a property whose
+`value-type` is `blob` (a value type still to come). The value is a BLAKE3
+hash, with the MIME type, size and an optional file name alongside. The bytes
+live in the iroh-blobs store, not in the Loro document.
 
 - Portable devices fetch blobs **when they're opened** and may evict them
   later. The headless node keeps them all.
@@ -345,36 +367,44 @@ Export is a directory:
 
 ```
 quiddity-export/
-  quiddity.json            format version, graph ID, export time
-  schema/                  property and type definitions as entities
+  quiddity.json            marks a Quiddity export, with its format version
   entities/
-    Jane (person).md
-    Jane (person) 2.md     same name and properties: filename suffix only
+    Jane.md
+    Jane 2.md              same name, different entity: file name suffix only
   journals/
     2026-10-25.md
-  assets/
-    <blake3>.<ext>
+  assets/                  (with blobs) <blake3>.<ext>
 ```
 
-Each file is a Markdown outline:
+Each file is an outline in the style of Logseq's original format:
 
 ```markdown
-#type(person)#born(1970-01-01)
+title:: Jane
+type:: person
+born:: 1970-01-01
 
-- Met at [[Platform Summit#type(event)]]
-  #status(done)
-  - Child block with a ((0198f0c4-…)) reference
-- Photo #file(assets/9f2c….jpg)
-  #id(0198f0c4-…)
+- Met at [[Platform Summit#type(event)]] #status(done)
+  a second line of the same block
+	- Child block with a ((0198f0c4-…)) reference
+- Quotable
+  id:: 0198f0c4-…
 ```
 
-- The page's own properties go on the first line.
-- Block properties go on a continuation line under the block.
-- `#id(…)` is written only for blocks that something references by ID
-  (`((…))`), as Logseq does with `id::`.
-- Import is lossless for anything that came from an export. Plain Logseq or
-  Obsidian Markdown imports on a best-effort basis: `key:: value` and YAML
-  front matter become properties.
+- The lines before the first bullet are the entity's name (`title::`, so
+  names needn't be valid or unique file names) followed by its properties
+  block.
+- Child bullets are indented with one tab per level. Continuation lines get
+  the bullet's tabs plus two spaces.
+- Since text is the source of truth, block properties need no special
+  handling: they're simply part of each block's text.
+- Re-importing an export is lossless (tested as a round trip). With the
+  manifest present, indentation is read strictly. Without it, as for a
+  Logseq graph, it's judged by width, fenced code is respected, `logseq/` and
+  hidden directories are skipped, and files in `journals/` named
+  `2026_10_25.md` or `2026-10-25.md` become journal pages.
+- Exports skip duplicates that have been fully merged. Importing the same
+  export twice creates duplicates of everything except journals and property
+  entities, which merge.
 
 ## UI model
 
@@ -383,8 +413,9 @@ Each file is a Markdown outline:
   Logseq's edit-raw/view-rendered toggle.
 - **Pages** are entities. **Journals** are the default home: today's page plus
   scroll-back.
-- **Properties** appear as chips. Typing `#prop(value)` creates one; the schema
-  drives the value editor (date picker, reference autocomplete, etc).
+- **Properties** are rendered as chips when a block isn't being edited, and
+  as their Markdown when it is. The schema drives the editing aids (date
+  picker, reference autocomplete, etc), which write Markdown into the text.
 - **Linked and unlinked references** appear at the foot of every entity page.
   Disambiguation pages are as described above.
 - **Presence**: other devices or users editing the same block appear as
@@ -392,27 +423,24 @@ Each file is a Markdown outline:
 - Later: queries over properties, table and board views by type, and a
   plugin API.
 
+## Decisions so far
+
+- Properties: Logseq-style `key:: value` lines, with an entity's own
+  properties in its initial block, plus inline `#prop(value)`. The Markdown is
+  the source of truth.
+- Property names are unique.
+- Lists are explicit: `#prop([a, b])`.
+- `crates/syntax` (Rust) is the reference parser. The UI uses it via WASM.
+
 ## Open questions
 
-1. **Where properties live relative to text.** This draft stores properties
-   structurally and treats `#prop(value)` as the way they are typed and
-   exported. If a sentence contains `#prop(value)` midway, do we keep the token
-   in the text, so the text stays the reference and the property is derived
-   from it, or lift it out into a chip? Keeping it in the text gives perfect
-   round-tripping but makes the text the source of truth for properties.
-   Lifting it out keeps typed, last-writer-wins semantics.
-2. **Uniqueness of property names.** Inside `[[Name#type(person)]]`, `type` is
-   itself resolved by name. Should property-key names be unique within a graph,
-   with duplicates merged like journals, or do property keys need
-   disambiguating too, recursively?
-3. **List syntax.** How is a single instance holding a list written?
-   `#prop(a, b)` driven by the schema, or explicit `#prop([a, b])` so it can be
-   parsed without knowing the schema?
-4. **Unsynced edits on eviction.** What happens to edits made on a device that
+1. **Unsynced edits on eviction.** What happens to edits made on a device that
    was evicted: diff and re-apply, or kept as a separate entity to sort out by
    hand?
-5. **At-rest encryption on the headless node.** Is the user's own node trusted
+2. **At-rest encryption on the headless node.** Is the user's own node trusted
    with plaintext, or should it eventually run "blind" and store only encrypted
    snapshots?
-6. **Parser reference implementation.** Rust compiled to WASM shared with the
-   UI, or TypeScript and Rust kept in step by a shared test corpus?
+3. **Concurrent edits to one property value.** Since properties are text, two
+   devices editing the same value offline get a character-level merge. Is that
+   acceptable, or should the UI detect a value that changed on both sides and
+   ask?

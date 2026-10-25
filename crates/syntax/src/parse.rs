@@ -1,0 +1,769 @@
+use std::ops::Range;
+
+/// A property value as written in Markdown.
+///
+/// Values are untyped at this level: a property's schema decides whether
+/// `2026-10-25` is a date or just text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Value {
+    /// Plain or quoted text, with escapes removed.
+    Text(String),
+    /// A link to an entity, `[[Name#prop(value)]]`.
+    Link(Link),
+    /// A reference to a block by its `id` property, `((id))`.
+    BlockRef(String),
+    /// An explicit list, `[a, b]`. Lists don't nest.
+    List(Vec<Value>),
+}
+
+/// A link to an entity by name, optionally narrowed by the target's properties.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    pub name: String,
+    pub qualifiers: Vec<Qualifier>,
+}
+
+/// One `#key` or `#key(value)` inside a link.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Qualifier {
+    pub key: String,
+    pub value: Option<Value>,
+}
+
+/// How a property was written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyStyle {
+    /// `key:: value` on a line of its own.
+    Line,
+    /// `#key` or `#key(value)` within the text.
+    Inline,
+}
+
+/// One occurrence of a property in a block's text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Property {
+    pub key: String,
+    pub value: Option<Value>,
+    pub style: PropertyStyle,
+    /// Byte range of the occurrence within the block's text.
+    pub span: Range<usize>,
+}
+
+/// Everything Quiddity cares about in a block's text.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Block {
+    pub properties: Vec<Property>,
+    /// Links in the text and in property values, in order of appearance.
+    pub links: Vec<Link>,
+    /// Block references in the text, in order of appearance.
+    pub block_refs: Vec<String>,
+}
+
+/// Parses a block's text. Never fails: malformed syntax is plain text.
+pub fn parse_block(text: &str) -> Block {
+    let mut block = Block::default();
+    let mut fence: Option<(char, usize)> = None;
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let content = content.strip_suffix('\r').unwrap_or(content);
+        match (fence_marker(content), fence) {
+            (Some((c, n, _)), None) => fence = Some((c, n)),
+            (Some((c, n, true)), Some((open, len))) if c == open && n >= len => fence = None,
+            (_, Some(_)) => {}
+            (None, None) => parse_line(content, offset, &mut block),
+        }
+        offset += line.len();
+    }
+    block
+}
+
+/// Whether a block consists only of `key:: value` lines, like the initial
+/// block of an entity that holds the entity's properties.
+pub fn is_properties_block(text: &str) -> bool {
+    let mut any = false;
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        if parse_property_line(line).is_none() {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
+/// Parses a `key:: value` line.
+///
+/// The key must start with a letter, digit or underscore and may not contain
+/// `:`, `#`, brackets or parentheses. `::` must be followed by whitespace or
+/// the end of the line.
+pub fn parse_property_line(line: &str) -> Option<(String, Option<Value>)> {
+    let trimmed = line.trim_start();
+    let sep = trimmed.find("::")?;
+    let (key, rest) = (&trimmed[..sep], &trimmed[sep + 2..]);
+    let key_ok = key.chars().next().is_some_and(is_key_start)
+        && !key.ends_with(char::is_whitespace)
+        && !key.contains([':', '#', '[', ']', '(', ')']);
+    if !key_ok || !(rest.is_empty() || rest.starts_with([' ', '\t'])) {
+        return None;
+    }
+    let rest = rest.trim();
+    Some((
+        key.to_owned(),
+        (!rest.is_empty()).then(|| parse_line_value(rest)),
+    ))
+}
+
+/// Parses the value part of a `key:: value` line.
+///
+/// A value that is exactly a list, quoted string, link or block reference is
+/// parsed as such; anything else is the text as written.
+pub fn parse_line_value(value: &str) -> Value {
+    let mut sc = Scanner::new(value);
+    let mut links = Vec::new();
+    let parsed = if sc.at_list_start() {
+        parse_list(&mut sc, &mut links)
+    } else {
+        parse_scalar(&mut sc, &[], &mut links)
+    };
+    sc.skip_ws();
+    match parsed {
+        Some(Some(v)) if sc.at_end() => v,
+        _ => Value::Text(value.to_owned()),
+    }
+}
+
+/// Whether `key` can be written after `#` without `[[…]]` around it.
+pub(crate) fn is_bare_key(key: &str) -> bool {
+    let mut sc = Scanner::new(key);
+    !key.starts_with('[') && parse_key(&mut sc).as_deref() == Some(key) && sc.at_end()
+}
+
+fn parse_line(line: &str, offset: usize, block: &mut Block) {
+    if let Some((key, value)) = parse_property_line(line) {
+        block.properties.push(Property {
+            key,
+            value,
+            style: PropertyStyle::Line,
+            span: offset..offset + line.len(),
+        });
+        // Keys can't contain `:`, so the first `::` is the separator.
+        let start = line.find("::").map_or(line.len(), |i| i + 2);
+        scan_inline(&line[start..], offset + start, false, block);
+    } else {
+        scan_inline(line, offset, true, block);
+    }
+}
+
+fn scan_inline(line: &str, offset: usize, tags: bool, block: &mut Block) {
+    let mut sc = Scanner::new(line);
+    let mut prev: Option<char> = None;
+    while let Some(c) = sc.peek() {
+        let at = sc.pos;
+        if sc.eat_escape().is_some() {
+            prev = Some(c);
+            continue;
+        }
+        match c {
+            '`' => skip_code_span(&mut sc),
+            '[' if sc.rest().starts_with("[[") => match parse_link(&mut sc) {
+                Some(link) => block.links.push(link),
+                None => sc.pos += 2,
+            },
+            '(' if sc.rest().starts_with("((") => match parse_block_ref(&mut sc) {
+                Some(id) => block.block_refs.push(id),
+                None => sc.pos += 2,
+            },
+            '#' if tags
+                && (prev.is_none_or(|p| p.is_whitespace() || p == '(')
+                    || follows_property(block, offset + at)) =>
+            {
+                sc.pos += 1;
+                if let Some(key) = parse_key(&mut sc) {
+                    let mut links = Vec::new();
+                    let value = match sc.peek() {
+                        Some('(') => match parse_paren_value(&mut sc, &mut links) {
+                            Some(value) => {
+                                block.links.append(&mut links);
+                                value
+                            }
+                            None => None,
+                        },
+                        _ => None,
+                    };
+                    block.properties.push(Property {
+                        key,
+                        value,
+                        style: PropertyStyle::Inline,
+                        span: offset + at..offset + sc.pos,
+                    });
+                }
+            }
+            _ => {
+                sc.bump();
+            }
+        }
+        prev = line[..sc.pos].chars().next_back();
+    }
+}
+
+/// Whether an inline property ends exactly at `pos`, so that `#a(1)#b(2)`
+/// is two properties.
+fn follows_property(block: &Block, pos: usize) -> bool {
+    block
+        .properties
+        .last()
+        .is_some_and(|p| p.style == PropertyStyle::Inline && p.span.end == pos)
+}
+
+/// Returns the fence character, its run length, and whether the rest of the
+/// line is blank (so it could close a fence).
+fn fence_marker(line: &str) -> Option<(char, usize, bool)> {
+    let t = line.trim_start();
+    let c = t.chars().next().filter(|c| matches!(c, '`' | '~'))?;
+    let n = t.len() - t.trim_start_matches(c).len();
+    (n >= 3).then(|| (c, n, t[n..].trim().is_empty()))
+}
+
+fn skip_code_span(sc: &mut Scanner) {
+    let rest = sc.rest();
+    let run = rest.len() - rest.trim_start_matches('`').len();
+    let (fence, after) = rest.split_at(run);
+    let mut search = 0;
+    while let Some(i) = after[search..].find(fence) {
+        let at = search + i;
+        let len = after[at..].len() - after[at..].trim_start_matches('`').len();
+        if len == run {
+            sc.pos += run + at + run;
+            return;
+        }
+        search = at + len;
+    }
+    sc.pos += run;
+}
+
+fn is_key_start(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+fn is_key_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '_' | '-' | '/' | '.')
+}
+
+fn is_escapable(c: char) -> bool {
+    matches!(c, '\\' | '(' | ')' | '[' | ']' | ',' | '"' | '#')
+}
+
+/// Parses a property key after `#`: either bare (`status`, `due-date`,
+/// `area/work`) or bracketed (`[[due date]]`). Trailing full stops belong to
+/// the sentence, not the key, and all-digit keys (`#123`) aren't keys.
+fn parse_key(sc: &mut Scanner) -> Option<String> {
+    let start = sc.pos;
+    if let Some(inner) = sc.rest().strip_prefix("[[") {
+        let end = inner.find("]]")?;
+        let key = inner[..end].trim();
+        if key.is_empty() || key.contains(['[', ']']) {
+            return None;
+        }
+        sc.pos += 2 + end + 2;
+        return Some(key.to_owned());
+    }
+    if !sc.peek().is_some_and(is_key_start) {
+        return None;
+    }
+    while sc.peek().is_some_and(is_key_char) {
+        sc.bump();
+    }
+    let key = sc.src[start..sc.pos].trim_end_matches('.');
+    sc.pos = start + key.len();
+    if key.chars().all(|c| c.is_ascii_digit()) {
+        sc.pos = start;
+        return None;
+    }
+    Some(key.to_owned())
+}
+
+/// Parses `(value)`. The outer `None` means it wasn't well-formed (and the
+/// scanner hasn't moved); the inner `None` means `()`.
+fn parse_paren_value(sc: &mut Scanner, links: &mut Vec<Link>) -> Option<Option<Value>> {
+    let start = sc.pos;
+    let result = parse_paren_value_inner(sc, links);
+    if result.is_none() {
+        sc.pos = start;
+    }
+    result
+}
+
+fn parse_paren_value_inner(sc: &mut Scanner, links: &mut Vec<Link>) -> Option<Option<Value>> {
+    if !sc.eat("(") {
+        return None;
+    }
+    sc.skip_ws();
+    let value = if sc.at_list_start() {
+        parse_list(sc, links)?
+    } else {
+        parse_scalar(sc, &[')'], links)?
+    };
+    sc.skip_ws();
+    sc.eat(")").then_some(value)
+}
+
+fn parse_list(sc: &mut Scanner, links: &mut Vec<Link>) -> Option<Option<Value>> {
+    sc.eat("[");
+    let mut items = Vec::new();
+    sc.skip_ws();
+    if sc.eat("]") {
+        return Some(Some(Value::List(items)));
+    }
+    loop {
+        let item = parse_scalar(sc, &[',', ']'], links)?;
+        items.push(item.unwrap_or_else(|| Value::Text(String::new())));
+        sc.skip_ws();
+        if sc.eat("]") {
+            return Some(Some(Value::List(items)));
+        }
+        if !sc.eat(",") {
+            return None;
+        }
+    }
+}
+
+/// Parses a single value up to one of `terms` (or the end, if `terms` is
+/// empty). Brackets and parentheses inside it must balance.
+fn parse_scalar(sc: &mut Scanner, terms: &[char], links: &mut Vec<Link>) -> Option<Option<Value>> {
+    sc.skip_ws();
+    if sc.peek() == Some('"') {
+        return parse_quoted(sc).map(|s| Some(Value::Text(s)));
+    }
+    let start = sc.pos;
+    let mut text = String::new();
+    let mut depth = 0usize;
+    loop {
+        let Some(c) = sc.peek() else {
+            if terms.is_empty() {
+                break;
+            }
+            return None;
+        };
+        if depth == 0 && terms.contains(&c) {
+            break;
+        }
+        if let Some(e) = sc.eat_escape() {
+            text.push(e);
+            continue;
+        }
+        let at = sc.pos;
+        if sc.rest().starts_with("[[") {
+            if let Some(link) = parse_link(sc) {
+                text.push_str(&sc.src[at..sc.pos]);
+                links.push(link);
+                continue;
+            }
+        } else if sc.rest().starts_with("((") && parse_block_ref(sc).is_some() {
+            text.push_str(&sc.src[at..sc.pos]);
+            continue;
+        }
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        text.push(c);
+        sc.bump();
+    }
+    let raw = sc.src[start..sc.pos].trim();
+    if raw.is_empty() {
+        return Some(None);
+    }
+    let mut whole = Scanner::new(raw);
+    if raw.starts_with("[[")
+        && let Some(link) = parse_link(&mut whole).filter(|_| whole.at_end())
+    {
+        return Some(Some(Value::Link(link)));
+    }
+    if raw.starts_with("((")
+        && let Some(id) = parse_block_ref(&mut whole).filter(|_| whole.at_end())
+    {
+        return Some(Some(Value::BlockRef(id)));
+    }
+    Some(Some(Value::Text(text.trim().to_owned())))
+}
+
+fn parse_quoted(sc: &mut Scanner) -> Option<String> {
+    let start = sc.pos;
+    sc.bump();
+    let mut s = String::new();
+    loop {
+        match sc.bump() {
+            Some('"') => return Some(s),
+            Some('\\') => match sc.bump() {
+                Some('n') => s.push('\n'),
+                Some('r') => s.push('\r'),
+                Some(c) => s.push(c),
+                None => break,
+            },
+            Some(c) => s.push(c),
+            None => break,
+        }
+    }
+    sc.pos = start;
+    None
+}
+
+fn parse_block_ref(sc: &mut Scanner) -> Option<String> {
+    let inner = sc.rest().strip_prefix("((")?;
+    let end = inner.find("))")?;
+    let id = inner[..end].trim();
+    if id.is_empty() || id.contains(|c: char| c.is_whitespace() || c == '(' || c == ')') {
+        return None;
+    }
+    sc.pos += 2 + end + 2;
+    Some(id.to_owned())
+}
+
+/// Parses `[[…]]`. If the qualifiers aren't well-formed, everything up to the
+/// first `]]` is taken as the name.
+fn parse_link(sc: &mut Scanner) -> Option<Link> {
+    let start = sc.pos;
+    if let Some(link) = parse_structured_link(sc) {
+        return Some(link);
+    }
+    sc.pos = start;
+    let inner = sc.rest().strip_prefix("[[")?;
+    let end = inner.find("]]")?;
+    let name = inner[..end].trim();
+    if name.is_empty() {
+        return None;
+    }
+    sc.pos += 2 + end + 2;
+    Some(Link {
+        name: name.to_owned(),
+        qualifiers: Vec::new(),
+    })
+}
+
+fn parse_structured_link(sc: &mut Scanner) -> Option<Link> {
+    if !sc.eat("[[") {
+        return None;
+    }
+    let mut name = String::new();
+    while !sc.rest().starts_with("]]") && !sc.at_qualifier() {
+        if let Some(e) = sc.eat_escape() {
+            name.push(e);
+        } else if sc.rest().starts_with("[[") {
+            return None;
+        } else {
+            name.push(sc.bump()?);
+        }
+    }
+    let mut qualifiers = Vec::new();
+    while sc.eat("#") {
+        let key = parse_key(sc)?;
+        let mut ignored = Vec::new();
+        let value = match sc.peek() {
+            Some('(') => parse_paren_value(sc, &mut ignored)?,
+            _ => None,
+        };
+        qualifiers.push(Qualifier { key, value });
+    }
+    let name = name.trim();
+    (sc.eat("]]") && !name.is_empty()).then(|| Link {
+        name: name.to_owned(),
+        qualifiers,
+    })
+}
+
+struct Scanner<'a> {
+    src: &'a str,
+    pos: usize,
+}
+
+impl<'a> Scanner<'a> {
+    fn new(src: &'a str) -> Self {
+        Self { src, pos: 0 }
+    }
+
+    fn rest(&self) -> &'a str {
+        &self.src[self.pos..]
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.rest().chars().next()
+    }
+
+    fn bump(&mut self) -> Option<char> {
+        let c = self.peek()?;
+        self.pos += c.len_utf8();
+        Some(c)
+    }
+
+    fn eat(&mut self, s: &str) -> bool {
+        let matched = self.rest().starts_with(s);
+        if matched {
+            self.pos += s.len();
+        }
+        matched
+    }
+
+    fn eat_escape(&mut self) -> Option<char> {
+        let mut chars = self.rest().chars();
+        if chars.next()? != '\\' {
+            return None;
+        }
+        let c = chars.next().filter(|&c| is_escapable(c))?;
+        self.pos += 1 + c.len_utf8();
+        Some(c)
+    }
+
+    fn skip_ws(&mut self) {
+        while matches!(self.peek(), Some(' ' | '\t')) {
+            self.pos += 1;
+        }
+    }
+
+    fn at_end(&self) -> bool {
+        self.pos >= self.src.len()
+    }
+
+    fn at_list_start(&self) -> bool {
+        self.rest().starts_with('[') && !self.rest().starts_with("[[")
+    }
+
+    fn at_qualifier(&self) -> bool {
+        self.rest()
+            .strip_prefix('#')
+            .is_some_and(|r| r.starts_with("[[") || r.chars().next().is_some_and(is_key_start))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(s: &str) -> Value {
+        Value::Text(s.to_owned())
+    }
+
+    fn link(name: &str) -> Link {
+        Link {
+            name: name.to_owned(),
+            qualifiers: Vec::new(),
+        }
+    }
+
+    fn props(src: &str) -> Vec<(String, Option<Value>)> {
+        parse_block(src)
+            .properties
+            .into_iter()
+            .map(|p| (p.key, p.value))
+            .collect()
+    }
+
+    fn prop(key: &str, value: Option<Value>) -> (String, Option<Value>) {
+        (key.to_owned(), value)
+    }
+
+    #[test]
+    fn property_lines() {
+        assert_eq!(
+            props("type:: person\nborn:: 1970-01-01\nDue date:: tomorrow"),
+            vec![
+                prop("type", Some(text("person"))),
+                prop("born", Some(text("1970-01-01"))),
+                prop("Due date", Some(text("tomorrow"))),
+            ]
+        );
+        assert_eq!(props("empty::"), vec![prop("empty", None)]);
+        assert_eq!(
+            props("  indented:: yes"),
+            vec![prop("indented", Some(text("yes")))]
+        );
+    }
+
+    #[test]
+    fn not_property_lines() {
+        for line in [
+            "http://example.com::x",
+            "no space::after",
+            "- bullet:: no",
+            "#tag:: no",
+            "key :: no",
+            ":: no",
+        ] {
+            assert!(parse_property_line(line).is_none(), "{line}");
+        }
+    }
+
+    #[test]
+    fn line_values() {
+        assert_eq!(
+            parse_line_value("[a, b, [[C]]]"),
+            Value::List(vec![text("a"), text("b"), Value::Link(link("C"))])
+        );
+        assert_eq!(parse_line_value("[[Jane]]"), Value::Link(link("Jane")));
+        assert_eq!(parse_line_value("((abc))"), Value::BlockRef("abc".into()));
+        assert_eq!(parse_line_value("\"quoted, text\""), text("quoted, text"));
+        assert_eq!(parse_line_value("a, b"), text("a, b"));
+        assert_eq!(
+            parse_line_value("met [[Jane]] at lunch"),
+            text("met [[Jane]] at lunch")
+        );
+        assert_eq!(parse_line_value(r"C:\Users\me"), text(r"C:\Users\me"));
+        assert_eq!(parse_line_value("\"unterminated"), text("\"unterminated"));
+        assert_eq!(parse_line_value("[unterminated"), text("[unterminated"));
+    }
+
+    #[test]
+    fn inline_properties() {
+        assert_eq!(
+            props("Call #status(waiting) about #project, see #[[due date]](2026-10-25)."),
+            vec![
+                prop("status", Some(text("waiting"))),
+                prop("project", None),
+                prop("due date", Some(text("2026-10-25"))),
+            ]
+        );
+    }
+
+    #[test]
+    fn inline_values() {
+        assert_eq!(
+            props("#p([a, b])"),
+            vec![prop("p", Some(Value::List(vec![text("a"), text("b")])))]
+        );
+        assert_eq!(props("#p([])"), vec![prop("p", Some(Value::List(vec![])))]);
+        let two = vec![prop("p", Some(text("a"))), prop("p", Some(text("b")))];
+        assert_eq!(props("#p(a)#p(b)"), two);
+        assert_eq!(props("#p(a) #p(b)"), two);
+        assert_eq!(props("#p(\"a)b\")"), vec![prop("p", Some(text("a)b")))]);
+        assert_eq!(props(r"#p(a\)b)"), vec![prop("p", Some(text("a)b")))]);
+        assert_eq!(props("#p(f(x))"), vec![prop("p", Some(text("f(x)")))]);
+        assert_eq!(props("#p()"), vec![prop("p", None)]);
+        assert_eq!(props("#author([[Jane#type(person)]])").len(), 1);
+        assert_eq!(
+            props("#p(unclosed"),
+            vec![prop("p", None)],
+            "falls back to a bare tag"
+        );
+    }
+
+    #[test]
+    fn inline_property_spans() {
+        let src = "go #to(there) now";
+        let block = parse_block(src);
+        assert_eq!(&src[block.properties[0].span.clone()], "#to(there)");
+    }
+
+    #[test]
+    fn not_tags() {
+        for src in [
+            "# Heading",
+            "## Heading",
+            "issue #123",
+            "foo#bar",
+            "https://example.com/#frag",
+            "`#code`",
+            "``a `#b` c``",
+            r"\#escaped",
+            "```\n#fenced\n```",
+            "~~~~\n#fenced\n~~~\n#still\n~~~~",
+        ] {
+            assert_eq!(props(src), vec![], "{src}");
+        }
+    }
+
+    #[test]
+    fn tags_after_code_and_fences() {
+        assert_eq!(props("`code` #tag"), vec![prop("tag", None)]);
+        assert_eq!(props("```\nx\n```\n#tag"), vec![prop("tag", None)]);
+        assert_eq!(props("(#tag)"), vec![prop("tag", None)]);
+        assert_eq!(props("#tag."), vec![prop("tag", None)]);
+        assert_eq!(props("#v1.2"), vec![prop("v1.2", None)]);
+        assert_eq!(props("#area/work"), vec![prop("area/work", None)]);
+    }
+
+    #[test]
+    fn links() {
+        let block =
+            parse_block("See [[Jane]] and [[Jane#type(person)#born(1970-01-01)]] or [[C# notes]].");
+        assert_eq!(
+            block.links,
+            vec![
+                link("Jane"),
+                Link {
+                    name: "Jane".into(),
+                    qualifiers: vec![
+                        Qualifier {
+                            key: "type".into(),
+                            value: Some(text("person"))
+                        },
+                        Qualifier {
+                            key: "born".into(),
+                            value: Some(text("1970-01-01"))
+                        },
+                    ],
+                },
+                link("C# notes"),
+            ]
+        );
+    }
+
+    #[test]
+    fn link_edge_cases() {
+        let links = |s: &str| parse_block(s).links;
+        assert_eq!(links("[[]]"), vec![]);
+        assert_eq!(links("[[unclosed"), vec![]);
+        assert_eq!(links("[[C#]]"), vec![link("C#")]);
+        assert_eq!(links(r"[[F\#sharp]]"), vec![link("F#sharp")]);
+        assert_eq!(links("[[Name#bad(]]"), vec![link("Name#bad(")]);
+        assert_eq!(
+            links("[[Book#author([[Jane]])]]"),
+            vec![Link {
+                name: "Book".into(),
+                qualifiers: vec![Qualifier {
+                    key: "author".into(),
+                    value: Some(Value::Link(link("Jane")))
+                }],
+            }]
+        );
+        assert_eq!(
+            links("[[X#[[multi word]]]]"),
+            vec![Link {
+                name: "X".into(),
+                qualifiers: vec![Qualifier {
+                    key: "multi word".into(),
+                    value: None
+                }]
+            }]
+        );
+    }
+
+    #[test]
+    fn links_in_property_values() {
+        let block = parse_block("author:: [[Jane]]\n#with([[Bob]])");
+        assert_eq!(block.links, vec![link("Jane"), link("Bob")]);
+    }
+
+    #[test]
+    fn block_refs() {
+        let block = parse_block("As ((0198f0c4-aaaa)) said, (( not a ref )), `((code))`");
+        assert_eq!(block.block_refs, vec!["0198f0c4-aaaa".to_owned()]);
+    }
+
+    #[test]
+    fn properties_block() {
+        assert!(is_properties_block("type:: journal\n\ndate:: 2026-10-25\n"));
+        assert!(!is_properties_block("type:: journal\nand some text"));
+        assert!(!is_properties_block(""));
+        assert!(!is_properties_block("#tag"));
+    }
+
+    #[test]
+    fn bare_keys() {
+        assert!(is_bare_key("status"));
+        assert!(is_bare_key("area/work"));
+        assert!(!is_bare_key("due date"));
+        assert!(!is_bare_key("trailing."));
+        assert!(!is_bare_key("123"));
+        assert!(!is_bare_key(""));
+    }
+}
