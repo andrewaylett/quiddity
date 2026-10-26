@@ -1,12 +1,14 @@
 "use client";
 
-import { use } from "react";
-import { store } from "@/lib/store";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { useGraph, useRead } from "@/lib/use-graph";
 import { Region, Skeleton } from "./boundary";
 import { EntityLink } from "./entity-link";
+import { useView } from "./use-view";
 
 function List() {
-  const entities = use(store.entities());
+  const entities = useRead((g) => g.entities());
   if (entities.length === 0) return <p>Nothing here yet.</p>;
   return (
     <ul className="columns-1 gap-8 sm:columns-2">
@@ -24,6 +26,38 @@ function List() {
   );
 }
 
+function NewEntity() {
+  const graph = useGraph();
+  const router = useRouter();
+  const view = useView();
+  const [name, setName] = useState("");
+  return (
+    <form
+      className="mb-6 flex gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        router.push(view.toMain(graph.createEntity(trimmed)));
+      }}
+    >
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="New entity"
+        aria-label="Name of a new entity"
+        className="min-w-0 flex-1 rounded border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-600"
+      />
+      <button
+        type="submit"
+        className="rounded border border-slate-300 px-3 py-1 hover:bg-slate-200 dark:border-slate-600 dark:hover:bg-slate-700"
+      >
+        Create
+      </button>
+    </form>
+  );
+}
+
 export function AllEntities() {
   return (
     <article className="mx-auto max-w-3xl px-6 py-8">
@@ -36,6 +70,7 @@ export function AllEntities() {
           </p>
         )}
       >
+        <NewEntity />
         <List />
       </Region>
     </article>

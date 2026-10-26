@@ -13,9 +13,13 @@ See [docs/design.md](docs/design.md) for the current design.
 - `crates/sync`: the sync protocol, independent of transport.
 - `crates/node`: sync over iroh, and `quiddity-node`, a bare-bones command
   line and headless sync node.
+- `crates/view`: what a UI shows of a graph (entities, references, favourites,
+  journals) and the outliner's edits, tested natively.
+- `crates/wasm`: `quiddity-view` compiled to WASM: the UI's own replica of the
+  graph.
 - `apps/ui`: the Next.js UI (static export): three panes, with entrypoints,
   favourites and recents on the left, the current entity in the middle and
-  open secondaries on the right. Read-only for now.
+  open secondaries on the right, all editable.
 - `apps/app`: the Tauri 2 shell that hosts the UI.
 - `fuzz`: fuzz targets for the parsers and the sync protocol.
 
@@ -40,10 +44,16 @@ pnpm ui dev          # the UI alone, in a browser, at http://localhost:3000
 pnpm app dev         # the Tauri shell around it (needs Tauri's system packages)
 ```
 
+The UI embeds the graph replica, which is built from `crates/wasm`, so it needs
+the `wasm32-unknown-unknown` Rust target and a `wasm-bindgen` CLI matching the
+version in `crates/wasm/Cargo.toml` (`mise install` gets both). `pnpm ui wasm`
+rebuilds it; `dev`, `build` and `typecheck` do so first.
+
 The shell opens the one graph in the app's data directory, creating it if
 need be. Set `QUIDDITY_GRAPH` to a directory made with `quiddity-node` to work
 on that graph instead. Favourites are the entities with `favourite:: true`.
-Run in a plain browser, the UI shows fixture data.
+Run in a plain browser, the UI works on a made-up graph in memory, which is
+reset on reload.
 
 ## Testing
 

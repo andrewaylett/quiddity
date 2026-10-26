@@ -1,8 +1,8 @@
 "use client";
 
-import { use, useState } from "react";
+import { useState } from "react";
 import type { EntityId, Reference } from "@/lib/model";
-import { store } from "@/lib/store";
+import { useRead } from "@/lib/use-graph";
 import { Region, Skeleton } from "./boundary";
 import { EntityLink } from "./entity-link";
 import { Outline } from "./entity-view";
@@ -34,7 +34,7 @@ const count = (references: Reference[]) =>
   references.reduce((n, r) => n + r.blocks.length, 0);
 
 function Linked({ id }: { id: EntityId }) {
-  const references = use(store.references(id));
+  const references = useRead((g) => g.references(id));
   if (references.length === 0) return null;
   return (
     <section aria-label="Linked references">
@@ -45,7 +45,7 @@ function Linked({ id }: { id: EntityId }) {
 }
 
 function UnlinkedList({ id }: { id: EntityId }) {
-  const references = use(store.unlinkedReferences(id));
+  const references = useRead((g) => g.unlinkedReferences(id));
   if (references.length === 0) {
     return <p className="text-sm text-slate-500 dark:text-slate-400">None.</p>;
   }

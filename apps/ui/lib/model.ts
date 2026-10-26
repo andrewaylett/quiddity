@@ -23,29 +23,18 @@ export interface Entity extends EntityRef {
   links: Record<string, LinkTarget>;
 }
 
+/** What typing Backspace at the start of a block did: joined it to another. */
+export interface Merged {
+  /** The block that took the text. */
+  into: string;
+  /** Where the joined text begins in it, in UTF-16 units: the caret. */
+  at: number;
+}
+
 /** The blocks of one entity that mention another. */
 export interface Reference {
   source: EntityRef;
   /** Each with its children, for context. */
   blocks: Block[];
   links: Record<string, LinkTarget>;
-}
-
-/**
- * What the UI needs from the core. The Tauri shell implements it over IPC;
- * fixtures stand in when the UI runs in a plain browser. Promises must be
- * stable per argument so they can be read with `use()`.
- */
-export interface Store {
-  /** Entities whose `favourite` property is true. */
-  favourites(): Promise<EntityRef[]>;
-  /** Every entity, by name. */
-  entities(): Promise<EntityRef[]>;
-  /** Journal pages from today back, newest first. */
-  journals(): Promise<EntityRef[]>;
-  entity(id: EntityId): Promise<Entity>;
-  /** Blocks that link to the entity, by the entity they are in. */
-  references(id: EntityId): Promise<Reference[]>;
-  /** Blocks that mention the entity by name without linking to it. */
-  unlinkedReferences(id: EntityId): Promise<Reference[]>;
 }

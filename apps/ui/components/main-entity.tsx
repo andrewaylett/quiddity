@@ -1,16 +1,16 @@
 "use client";
 
-import { use, useEffect } from "react";
+import { useEffect } from "react";
 import type { EntityId } from "@/lib/model";
 import { recordVisit } from "@/lib/recents";
-import { store } from "@/lib/store";
+import { useRead } from "@/lib/use-graph";
 import { Region, Skeleton } from "./boundary";
 import { EntityBody, EntityTitle } from "./entity-view";
 import { References } from "./references";
 
 function Visit({ id }: { id: EntityId }) {
-  const entity = use(store.entity(id));
-  useEffect(() => recordVisit(entity), [entity]);
+  const { id: canonical, title } = useRead((g) => g.entity(id));
+  useEffect(() => recordVisit({ id: canonical, title }), [canonical, title]);
   return null;
 }
 
