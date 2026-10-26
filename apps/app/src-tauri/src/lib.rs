@@ -49,6 +49,8 @@ fn graph_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Opens links from the text of a block in the system's browser.
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             app.manage(Mutex::new(Session::open(&graph_dir(app)?)?));
             Ok(())

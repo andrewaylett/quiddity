@@ -135,7 +135,7 @@ test("a new entity can be made, written in, and found again", async ({ page }) =
   await page.getByLabel("Name of a new entity").fill("Fresh page");
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("heading", { name: "Fresh page", level: 1 })).toBeVisible();
-  await page.locator("main article > ul li p").first().click();
+  await page.locator("main article > ul [data-block-text]").first().click();
   await page.keyboard.type("first thought");
   await page.keyboard.press("Enter");
   await page.keyboard.type("second");
@@ -149,12 +149,12 @@ test("today's journal takes notes in the feed", async ({ page }) => {
   await page.goto("/");
   const today = page.locator("main section").first();
   await expect(today.getByRole("heading", { level: 2 })).toBeVisible();
-  await today.locator("li p").last().click();
+  await today.locator("[data-block-text]").last().click();
   await page.keyboard.press("End");
   await page.keyboard.press("Enter");
   await page.keyboard.type("in today");
   await page.keyboard.press("Escape");
-  await expect(today.locator("li p").filter({ hasText: "in today" })).toBeVisible();
+  await expect(today.locator("[data-block-text]").filter({ hasText: "in today" })).toBeVisible();
 });
 
 test("leaving a block never shows its old text", async ({ page }) => {

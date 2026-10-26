@@ -1,48 +1,12 @@
 "use client";
 
-import { Fragment, useContext, type ReactNode } from "react";
+import { useContext } from "react";
 import type { Block, EntityId, LinkTarget } from "@/lib/model";
 import { useRead } from "@/lib/use-graph";
 import { BlockEditor } from "./block-editor";
 import { EditableOutline } from "./editing";
 import { EditingContext } from "./editing-context";
-import { EntityLink } from "./entity-link";
-
-const unresolved = "cursor-help underline decoration-dashed underline-offset-2";
-
-/** `[[Name]]` becomes a link, as the core resolved it. */
-function Inline({ text, links }: { text: string; links: Record<string, LinkTarget> }) {
-  const parts: ReactNode[] = [];
-  const re = /\[\[([^\]]+)\]\]/g;
-  let last = 0;
-  for (const m of text.matchAll(re)) {
-    parts.push(text.slice(last, m.index));
-    const name = m[1]!;
-    const target = links[name] ?? { kind: "missing" };
-    parts.push(
-      target.kind === "entity" ? (
-        <EntityLink
-          key={m.index}
-          id={target.id}
-          className="text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
-        >
-          {name}
-        </EntityLink>
-      ) : (
-        <span
-          key={m.index}
-          className={`text-slate-500 dark:text-slate-400 ${unresolved}`}
-          title={target.kind === "ambiguous" ? "Several entities match" : "No such entity"}
-        >
-          {name}
-        </span>
-      ),
-    );
-    last = m.index + m[0].length;
-  }
-  parts.push(text.slice(last));
-  return parts.map((p, i) => <Fragment key={i}>{p}</Fragment>);
-}
+import { RenderedBlock } from "./rendered-block";
 
 /** One block: its text, rendered or being edited, then its children. */
 function BlockRow({ block, links }: { block: Block; links: Record<string, LinkTarget> }) {
@@ -56,15 +20,16 @@ function BlockRow({ block, links }: { block: Block; links: Record<string, LinkTa
         {isEditing ? (
           <BlockEditor id={block.id} caret={current.caret} />
         ) : (
-          <p
-            className={`min-h-[1.5em] whitespace-pre-line break-words ${
-              editing ? "cursor-text" : ""
-            }`}
+          <div
+            data-block-text
+            className={`min-h-[1.5em] break-words [&>*+*]:mt-1 ${editing ? "cursor-text" : ""}`}
             tabIndex={editing ? 0 : undefined}
             onClick={(e) => {
-              if (editing && !(e.target as HTMLElement).closest("a")) {
-                editing.edit(block.id, "end");
-              }
+              // Links and chips do their own thing, and so does selecting text.
+              const target = e.target as HTMLElement;
+              if (!editing || target.closest("a, button, input")) return;
+              if (window.getSelection()?.toString()) return;
+              editing.edit(block.id, "end");
             }}
             onKeyDown={(e) => {
               if (editing && e.target === e.currentTarget && e.key === "Enter") {
@@ -73,8 +38,8 @@ function BlockRow({ block, links }: { block: Block; links: Record<string, LinkTa
               }
             }}
           >
-            <Inline text={block.text} links={links} />
-          </p>
+            <RenderedBlock block={block} links={links} />
+          </div>
         )}
         {block.children.length > 0 && (
           <div className="mt-1">

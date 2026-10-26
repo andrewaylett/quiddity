@@ -12,9 +12,12 @@ use quiddity_view::{Error, View};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-/// Converts to a plain JavaScript value: objects rather than `Map`s.
+/// Converts to a plain JavaScript value: objects rather than `Map`s, and `null`
+/// for a missing value (rather than `undefined`) to match the TypeScript types.
 fn js<T: Serialize>(value: &T) -> Result<JsValue, JsError> {
-    let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+    let serializer = serde_wasm_bindgen::Serializer::new()
+        .serialize_maps_as_objects(true)
+        .serialize_missing_as_null(true);
     Ok(value.serialize(&serializer)?)
 }
 
