@@ -35,6 +35,13 @@ gives a replica that:
   and `import` checks that what it imported shows in the version
   (`Error::NotApplied` if not), so nothing goes missing without a word.
 
+`compaction_point` applies that rule using the device list
+(`devices.rs`), which holds what each device has stored. It only works if
+every device is in the list: the one that creates a graph records itself,
+and a device vouches for each newcomer it hands the graph to
+(`vouch_for`). A blank replica must not edit (or vouch) before it joins: an
+edit with nothing beneath it can't be applied by a compacted replica.
+
 ## The model
 
 - **Markdown is the source of truth.** Properties, links and block refs are
