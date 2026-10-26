@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 71cfc047e580b7cd63ce761d23a6d9799bad483b3aa7b0c34c967b69448c0607 # shrinks to steps = [Sync(2, 2), Sync(2, 1), Write { replica: 2, day: 1 }, Sync(2, 2), Write { replica: 0, day: 0 }, Write { replica: 2, day: 0 }, Sync(2, 1), Merge(2), Write { replica: 1, day: 0 }, Sync(2, 0), Sync(0, 0), Merge(1), Merge(0), Merge(1), Sync(1, 0), Sync(1, 2), Merge(2), Write { replica: 2, day: 1 }, Merge(2), Write { replica: 0, day: 0 }, Write { replica: 2, day: 1 }]
