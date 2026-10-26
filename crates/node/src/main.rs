@@ -160,7 +160,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             peer.connect(&endpoint, target, Some(Duration::from_secs(2)))
                 .await?;
             let graph = peer.graph();
-            merge_duplicates(graph, &Index::build(graph)?)?;
+            peer.tidy()?;
             store.save(graph)?;
             endpoint.close().await;
             println!("synced");
@@ -178,16 +178,13 @@ fn save_on_change(peer: Peer, store: Store) {
         while changes.changed().await.is_ok() {
             tokio::time::sleep(Duration::from_millis(500)).await;
             changes.mark_unchanged();
-            let graph = peer.graph();
-            let saved = (|| -> anyhow::Result<bool> {
-                let moved = merge_duplicates(graph, &Index::build(graph)?)?;
-                store.save(graph)?;
-                Ok(moved > 0)
+            let saved = (|| -> anyhow::Result<()> {
+                peer.tidy()?;
+                store.save(peer.graph())?;
+                Ok(())
             })();
-            match saved {
-                Ok(true) => peer.changed(),
-                Ok(false) => {}
-                Err(e) => eprintln!("quiddity-node: saving failed: {e:#}"),
+            if let Err(e) = saved {
+                eprintln!("quiddity-node: saving failed: {e:#}");
             }
         }
     });

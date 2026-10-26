@@ -16,7 +16,7 @@ use std::time::Duration;
 use iroh::endpoint::{Connection, ConnectionError, ReadError, RecvStream, SendStream, WriteError};
 use iroh::protocol::{AcceptError, ProtocolHandler};
 use iroh::{Endpoint, EndpointAddr, EndpointId};
-use quiddity_core::Graph;
+use quiddity_core::{Graph, Index, merge_duplicates};
 use quiddity_sync::{DecodeError, FrameError, FrameReader, Message, Session, State, write_frame};
 use tokio::sync::watch;
 
@@ -92,6 +92,18 @@ impl Peer {
     /// Call after committing local edits, to send them to connected peers.
     pub fn changed(&self) {
         self.inner.changes.send_modify(|n| *n = n.wrapping_add(1));
+    }
+
+    /// Merges duplicate entities that arrived from different devices, and
+    /// sends the merge on to connected devices. Returns whether anything
+    /// moved.
+    pub fn tidy(&self) -> Result<bool, quiddity_core::Error> {
+        let graph = self.graph();
+        let moved = merge_duplicates(graph, &Index::build(graph)?)? > 0;
+        if moved {
+            self.changed();
+        }
+        Ok(moved)
     }
 
     /// Watches for changes to the graph, local or from peers.

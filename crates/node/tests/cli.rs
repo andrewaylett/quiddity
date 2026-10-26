@@ -62,6 +62,12 @@ fn import_serve_sync_export() {
     );
     let b_id = run(node(&b).args(["init", "--blank"]));
     run(node(&c).args(["init", "--blank"]));
+    // b has something of its own, which the server must save as it arrives:
+    // the server is killed, not stopped, so it has no chance to save later.
+    let from_b = tmp.path().join("from-b");
+    fs::create_dir_all(from_b.join("pages")).unwrap();
+    fs::write(from_b.join("pages/Bob.md"), "- Written on b\n").unwrap();
+    run(node(&b).arg("import").arg(&from_b));
 
     let mut server = node(&a)
         .args(["serve", "--allow", &b_id, "--local", "127.0.0.1:0"])
@@ -91,7 +97,31 @@ fn import_serve_sync_export() {
         run(node(graph).arg("export").arg(tmp.path().join(out)));
     }
     let exported = files(&tmp.path().join("a-out"));
-    assert_eq!(exported.len(), 2);
+    assert_eq!(exported.len(), 3);
     assert_eq!(files(&tmp.path().join("b-out")), exported);
     assert!(files(&tmp.path().join("c-out")).is_empty());
+}
+
+#[test]
+fn serve_needs_to_be_told_who_may_connect() {
+    let tmp = tempfile::tempdir().unwrap();
+    let graph = tmp.path().join("g");
+    run(node(&graph).arg("init"));
+
+    let mut server = node(&graph)
+        .args(["serve", "--allow-any", "--local", "127.0.0.1:0"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(server.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    server.kill().unwrap();
+    server.wait().unwrap();
+    assert!(line.starts_with("serving "), "{line:?}");
+
+    let output = node(&graph).arg("serve").output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--allow"));
 }
