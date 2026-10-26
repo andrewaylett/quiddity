@@ -147,8 +147,8 @@ property entity can describe its values:
 
 A property with no entity, or one whose entity doesn't say, is untyped text,
 scalar, any number of instances. Quiddity's own properties (`type`, `alias`,
-`date`, `id`, `title`, and the three above) have built-in schemas, so no
-bootstrap blocks or genesis snapshot are needed. Because names are unique,
+`date`, `favourite`, `id`, `title`, and the three above) have built-in
+schemas, so no bootstrap blocks or genesis snapshot are needed. Because names are unique,
 a built-in is found by its name alone. A property entity for one of them is
 optional and only adds documentation.
 
@@ -424,6 +424,9 @@ born:: 1970-01-01
 - **Three panes.** Entrypoints, favourites and recents on the left; the
   current entity in the middle; open secondaries on the right. The panes live
   in the root layout, so the middle pane is the routed page.
+- **The left pane**: fixed entrypoints (journals, all entities); favourites,
+  which are the entities with `favourite:: true`, so they live in the graph and
+  sync; and recents, which are per device and kept locally.
 - **View state is the URL**: `/entity/?id=<main>&open=<a>,<b>`. A static
   export cannot enumerate entities for dynamic path segments, and the right
   pane is a list rather than a route. Click opens in the main pane,

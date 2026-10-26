@@ -15,7 +15,7 @@ See [docs/design.md](docs/design.md) for the current design.
   line and headless sync node.
 - `apps/ui`: the Next.js UI (static export): three panes, with entrypoints,
   favourites and recents on the left, the current entity in the middle and
-  open secondaries on the right. Runs on fixtures until the core is wired in.
+  open secondaries on the right. Read-only for now.
 - `apps/app`: the Tauri 2 shell that hosts the UI.
 - `fuzz`: fuzz targets for the parsers and the sync protocol.
 
@@ -39,6 +39,11 @@ pnpm install
 pnpm ui dev          # the UI alone, in a browser, at http://localhost:3000
 pnpm app dev         # the Tauri shell around it (needs Tauri's system packages)
 ```
+
+The shell opens the one graph in the app's data directory, creating it if
+need be. Set `QUIDDITY_GRAPH` to a directory made with `quiddity-node` to work
+on that graph instead. Favourites are the entities with `favourite:: true`.
+Run in a plain browser, the UI shows fixture data.
 
 ## Testing
 
