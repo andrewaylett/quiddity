@@ -764,6 +764,12 @@ mod tests {
         assert_eq!(links("[[C#]]"), vec![link("C#")]);
         assert_eq!(links(r"[[F\#sharp]]"), vec![link("F#sharp")]);
         assert_eq!(links("[[Name#bad(]]"), vec![link("Name#bad(")]);
+        let block = parse_block("[[x#y( #k]]");
+        assert_eq!(
+            (block.links, block.properties),
+            (vec![link("x#y( #k")], vec![]),
+            "nothing inside a link is a tag"
+        );
         assert_eq!(
             links("[[Book#author([[Jane]])]]"),
             vec![Link {
@@ -797,7 +803,8 @@ mod tests {
 
     #[test]
     fn block_refs() {
-        let block = parse_block("As ((0198f0c4-aaaa)) said, (( not a ref )), `((code))`, [((b))]");
+        let block =
+            parse_block("As ((0198f0c4-aaaa)) said, (( not a ref )), `((code))`, [((b))], ((c(d))");
         assert_eq!(
             block.block_refs,
             vec!["0198f0c4-aaaa".to_owned(), "b".to_owned()]
