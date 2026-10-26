@@ -95,7 +95,7 @@ jobs:
     - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2
       with:
         tool: cargo-nextest,cargo-mutants
-    - run: git diff origin/${GITHUB_BASE_REF}... > pr.diff
+    - run: git diff "origin/${GITHUB_BASE_REF}..." > pr.diff
     - run: cargo mutants --in-diff pr.diff --no-shuffle -j 2 --timeout-multiplier 3
       env:
         PROPTEST_CASES: 64
