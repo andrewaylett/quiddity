@@ -3,8 +3,9 @@
 Notes for anyone (person or agent) changing this repository. The design is in
 [docs/design.md](docs/design.md); the layout and commands are in the
 [README](README.md). Crates with non-obvious behaviour have their own
-`AGENTS.md`: read it before changing that crate. Each one has a `CLAUDE.md`
-beside it that imports it with `@AGENTS.md`, so Claude Code loads it too.
+`AGENTS.md`, and so do the apps (`apps/ui`, `apps/app`): read it before
+changing that crate or app. Each one has a `CLAUDE.md` beside it that imports
+it with `@AGENTS.md`, so Claude Code loads it too.
 
 ## Git
 
@@ -66,6 +67,13 @@ A timeout counts as caught, but costs the run 20 seconds a time: if a test
 sends a mutant into a loop, check for the fast failure first.
 
 ### Tools
+
+- The UI embeds the core compiled to WASM, so it needs the
+  `wasm32-unknown-unknown` target and a `wasm-bindgen` CLI of exactly the
+  version `crates/wasm` pins (`mise install` gets both). Browser tests need
+  Playwright's Chromium: see [apps/ui](apps/ui/AGENTS.md).
+- `cargo mutants` copies the source tree, build output included: delete
+  `apps/app/src-tauri/target` first, or use `-j 1`, if the disk is small.
 
 - `cargo fuzz` installed as a prebuilt binary targets musl; pass
   `--target x86_64-unknown-linux-gnu`.
