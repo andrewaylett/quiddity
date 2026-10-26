@@ -253,7 +253,8 @@ pub fn parse_outline(src: &str, indent: Indent) -> Outline {
             .first_mut()
             .filter(|b| is_properties_block(&b.text))
     {
-        let lines: Vec<&str> = first.text.lines().collect();
+        // Line endings were dealt with above; a `\r` left is the text's own.
+        let lines: Vec<&str> = first.text.split('\n').collect();
         let (title, rest) = take_title(&lines);
         outline.title = title;
         if rest.is_empty() && first.children.is_empty() {
@@ -425,6 +426,9 @@ mod tests {
             first_bullet_props.blocks,
             vec![block("tags:: x", vec![]), block("body", vec![])]
         );
+        // A `\r` in Quiddity's own format is part of the text, even there.
+        let kept = parse_outline("- a:: x\r\n  b:: y\n", Indent::Tabs);
+        assert_eq!(kept.blocks, vec![block("a:: x\r\nb:: y", vec![])]);
     }
 
     #[test]
