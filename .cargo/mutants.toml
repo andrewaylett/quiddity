@@ -1,3 +1,7 @@
 # cargo mutants: https://mutants.rs/
 test_tool = "nextest"
 additional_cargo_test_args = ["--profile", "mutants"]
+
+# The WASM glue returns JavaScript values, so it only runs in a browser. What
+# it wraps (quiddity-view) is tested and mutation-tested natively.
+exclude_globs = ["crates/wasm/**"]

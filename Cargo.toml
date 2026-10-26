@@ -13,7 +13,8 @@ rust-version = "1.88"
 [workspace.dependencies]
 quiddity-core = { path = "crates/core" }
 quiddity-syntax = { path = "crates/syntax" }
-jiff = "0.2"
+# No time zone database: the UI only needs civil dates and timestamps.
+jiff = { version = "0.2", default-features = false, features = ["std"] }
 loro = "1.17"
 proptest = "1"
 tempfile = "3"

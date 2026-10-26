@@ -8,6 +8,8 @@ pub enum Error {
     Encode(#[from] loro::LoroEncodeError),
     #[error("block {0} does not exist")]
     NoSuchBlock(BlockId),
+    #[error("edit past the end of block {0}'s text")]
+    OutOfRange(BlockId),
     #[error("block {0} has no text container")]
     MissingText(BlockId),
     #[error("text update timed out")]
