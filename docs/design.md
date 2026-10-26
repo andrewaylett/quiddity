@@ -496,7 +496,18 @@ born:: 1970-01-01
 - **Pages** are entities. **Journals** are the default home: today's page, then
   earlier days as you scroll.
 - **Properties** are rendered as chips when a block isn't being edited, and
-  as their Markdown when it is. The schema drives the editing aids (date
+  as their Markdown when it is. `key:: value` lines come out of the text and
+  are drawn as pills below it (a link value is a live link, a list is a
+  comma-separated run); inline `#tag` and `#prop(value)` become pills where
+  they were written. The view returns each block's properties with where they
+  are written, in UTF-16 units, so the UI does not parse them itself.
+- **Block text is Markdown** (CommonMark with GFM: tables, task lists,
+  strikethrough) when not being edited, drawn by a renderer that makes React
+  elements rather than HTML strings, and that ignores raw HTML. Text comes from
+  other devices, so it is treated as untrusted: raw HTML shows as text; only
+  `http(s)` and `mailto` links are links, and they open in the system's browser
+  rather than replacing the app; remote images are not fetched; and `[[links]]`
+  and `((refs))` are looked for only in prose, not in code. The schema drives the editing aids (date
   picker, reference autocomplete, etc), which write Markdown into the text.
 - **Linked and unlinked references** appear at the foot of every entity page,
   grouped by the entity they are in (journals first, newest first). Unlinked

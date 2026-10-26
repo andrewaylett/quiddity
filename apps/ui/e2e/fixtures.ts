@@ -24,7 +24,7 @@ export function blockTexts(page: Page, outline: string): Promise<string[]> {
     (outline) =>
       [...document.querySelectorAll(`${outline} li`)].map((li) => {
         const own = li.querySelector(
-          ":scope > div > p, :scope > div > div .cm-content",
+          ":scope > div > [data-block-text], :scope > div > div .cm-content",
         );
         return own?.textContent ?? "";
       }),

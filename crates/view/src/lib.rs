@@ -14,7 +14,7 @@ use std::cell::{Cell, Ref, RefCell};
 use quiddity_core::{BlockId, Graph, Index};
 
 pub use edit::Merged;
-pub use query::{Block, Entity, EntityRef, LinkTarget, Reference};
+pub use query::{Block, Entity, EntityRef, LinkTarget, Property, PropertyValue, Reference};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

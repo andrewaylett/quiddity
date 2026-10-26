@@ -8,7 +8,29 @@ export interface EntityRef {
 export interface Block {
   id: string;
   text: string;
+  /** The properties written in `text`, in order, for rendering as chips. */
+  properties: Property[];
   children: Block[];
+}
+
+/** A property's value, as written. */
+export type PropertyValue =
+  | { kind: "text"; text: string }
+  /** `key` is how the link is written between its brackets: a key of `links`. */
+  | { kind: "link"; name: string; key: string }
+  | { kind: "ref"; id: string }
+  | { kind: "list"; items: PropertyValue[] };
+
+/** One property written in a block's text. */
+export interface Property {
+  key: string;
+  value: PropertyValue | null;
+  /** `#key(value)` within the text, rather than `key:: value` on a line. */
+  inline: boolean;
+  /** Where it is written, in UTF-16 units of the block's text. For a line
+   * property, the whole line. */
+  start: number;
+  end: number;
 }
 
 /** Where a `[[link]]` goes. */

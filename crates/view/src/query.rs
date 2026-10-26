@@ -4,7 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use jiff::civil::Date;
 use quiddity_core::schema::{Typed, coerce};
-use quiddity_core::syntax::{Value, format_link, is_properties_block, parse_block};
+use quiddity_core::syntax::{
+    Link, Property as Prop, PropertyStyle, Value, format_link, is_properties_block, parse_block,
+};
 use quiddity_core::{BlockId, Identity, Resolution, ensure_journal};
 use serde::Serialize;
 
@@ -22,7 +24,83 @@ pub struct EntityRef {
 pub struct Block {
     pub id: String,
     pub text: String,
+    /// The properties written in `text`, in order, for rendering as chips.
+    pub properties: Vec<Property>,
     pub children: Vec<Block>,
+}
+
+/// One property written in a block's text.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Property {
+    pub key: String,
+    pub value: Option<PropertyValue>,
+    /// `#key(value)` within the text, rather than `key:: value` on a line.
+    pub inline: bool,
+    /// Where it is written, in UTF-16 units of `text`, which is what
+    /// JavaScript counts in. For a line property, the whole line.
+    pub start: usize,
+    pub end: usize,
+}
+
+/// A property's value, as written.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PropertyValue {
+    Text {
+        text: String,
+    },
+    /// `key` is how the link is written between its brackets, to look it up in
+    /// the `links` of the entity or reference it is in.
+    Link {
+        name: String,
+        key: String,
+    },
+    Ref {
+        id: String,
+    },
+    List {
+        items: Vec<PropertyValue>,
+    },
+}
+
+/// A link as written between its brackets: the key of [`Entity::links`].
+fn link_key(link: &Link) -> String {
+    let written = format_link(link);
+    written
+        .strip_prefix("[[")
+        .and_then(|s| s.strip_suffix("]]"))
+        .unwrap_or(&written)
+        .to_owned()
+}
+
+fn property_value(value: &Value) -> PropertyValue {
+    match value {
+        Value::Text(text) => PropertyValue::Text { text: text.clone() },
+        Value::Link(link) => PropertyValue::Link {
+            name: link.name.clone(),
+            key: link_key(link),
+        },
+        Value::BlockRef(id) => PropertyValue::Ref { id: id.clone() },
+        Value::List(items) => PropertyValue::List {
+            items: items.iter().map(property_value).collect(),
+        },
+    }
+}
+
+/// UTF-16 units in the first `byte` bytes of `text`.
+fn utf16_at(text: &str, byte: usize) -> usize {
+    text[..byte].encode_utf16().count()
+}
+
+fn property(text: &str, p: &Prop) -> Property {
+    Property {
+        key: p.key.clone(),
+        value: p.value.as_ref().map(property_value),
+        inline: p.style == PropertyStyle::Inline,
+        start: utf16_at(text, p.span.start),
+        end: utf16_at(text, p.span.end),
+    }
 }
 
 /// Where a `[[link]]` goes.
@@ -156,13 +234,9 @@ impl View {
     fn block(&self, id: BlockId, links: &mut BTreeMap<String, LinkTarget>) -> Result<Block> {
         let text = self.graph.text(id)?;
         let index = self.index()?;
-        for link in parse_block(&text).links {
-            let written = format_link(&link);
-            let key = written
-                .strip_prefix("[[")
-                .and_then(|s| s.strip_suffix("]]"))
-                .unwrap_or(&written)
-                .to_owned();
+        let parsed = parse_block(&text);
+        for link in parsed.links {
+            let key = link_key(&link);
             let target = match index.resolve(&link) {
                 Resolution::Unique(id) => LinkTarget::Entity {
                     id: index.canonical(id).to_string(),
@@ -181,9 +255,15 @@ impl View {
             .into_iter()
             .map(|child| self.block(child, links))
             .collect::<Result<_>>()?;
+        let properties = parsed
+            .properties
+            .iter()
+            .map(|p| property(&text, p))
+            .collect();
         Ok(Block {
             id: id.to_string(),
             text,
+            properties,
             children,
         })
     }

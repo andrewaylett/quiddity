@@ -457,6 +457,110 @@ mod edits {
     }
 }
 
+mod properties {
+    use super::*;
+    use crate::{Property, PropertyValue};
+
+    /// The properties of a lone block with this text.
+    fn of(text: &str) -> Vec<Property> {
+        let (v, page, _) = page(&[text]);
+        v.entity(&page).unwrap().blocks.remove(0).properties
+    }
+
+    fn text_value(s: &str) -> Option<PropertyValue> {
+        Some(PropertyValue::Text { text: s.to_owned() })
+    }
+
+    #[test]
+    fn line_properties_come_with_their_value_and_where_they_are() {
+        let src = "prose\nstatus:: done\nrating:: 4";
+        let props = of(src);
+        assert_eq!(props.len(), 2);
+        assert_eq!(props[0].key, "status");
+        assert_eq!(props[0].value, text_value("done"));
+        assert!(!props[0].inline);
+        assert_eq!(&src[props[0].start..props[0].end], "status:: done");
+        assert_eq!(&src[props[1].start..props[1].end], "rating:: 4");
+    }
+
+    #[test]
+    fn inline_properties_are_marked_and_may_have_no_value() {
+        let src = "see #urgent and #due(friday) ok";
+        let props = of(src);
+        let keys: Vec<_> = props.iter().map(|p| (p.key.as_str(), p.inline)).collect();
+        assert_eq!(keys, [("urgent", true), ("due", true)]);
+        assert_eq!(props[0].value, None);
+        assert_eq!(props[1].value, text_value("friday"));
+        assert_eq!(&src[props[1].start..props[1].end], "#due(friday)");
+    }
+
+    #[test]
+    fn offsets_count_utf16_units_not_bytes() {
+        let src = "😀 é\nkey:: v";
+        let props = of(src);
+        let units: Vec<u16> = src.encode_utf16().collect();
+        let written = String::from_utf16(&units[props[0].start..props[0].end]).unwrap();
+        assert_eq!(written, "key:: v");
+        assert_eq!(
+            props[0].start, 5,
+            "emoji is two units, é one, a space, a newline"
+        );
+    }
+
+    #[test]
+    fn values_can_be_links_block_refs_and_lists() {
+        let props = of("a:: [[Some Page]]\nb:: ((abc))\nc:: [x, [[Y]]]");
+        assert_eq!(
+            props[0].value,
+            Some(PropertyValue::Link {
+                name: "Some Page".into(),
+                key: "Some Page".into()
+            })
+        );
+        assert_eq!(
+            props[1].value,
+            Some(PropertyValue::Ref { id: "abc".into() })
+        );
+        let Some(PropertyValue::List { items }) = &props[2].value else {
+            panic!("a list")
+        };
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0], PropertyValue::Text { text: "x".into() });
+        assert!(matches!(&items[1], PropertyValue::Link { name, .. } if name == "Y"));
+    }
+
+    #[test]
+    fn a_links_key_finds_it_in_the_entitys_links() {
+        let v = view_with(|g| {
+            g.create_entity("Target", &[]).unwrap();
+            let e = g.create_entity("Source", &[]).unwrap();
+            note(g, e, "ref:: [[Target#type(thing)]]");
+        });
+        let e = v.entity(&id_of(&v, "Source")).unwrap();
+        let Some(PropertyValue::Link { key, .. }) = &e.blocks[0].properties[0].value else {
+            panic!("a link value")
+        };
+        assert!(e.links.contains_key(key), "{key:?} in {:?}", e.links.keys());
+    }
+
+    #[test]
+    fn code_is_not_properties() {
+        assert!(of("```\nnot:: a property\n```").is_empty());
+        assert!(of("plain prose").is_empty());
+    }
+
+    #[test]
+    fn references_carry_them_too() {
+        let v = view_with(|g| {
+            g.create_entity("Alpha", &[]).unwrap();
+            let b = g.create_entity("Beta", &[]).unwrap();
+            note(g, b, "[[Alpha]] mentioned\nstate:: open");
+        });
+        let refs = v.references(&id_of(&v, "Alpha")).unwrap();
+        assert_eq!(refs[0].blocks[0].properties[0].key, "state");
+    }
+}
+
 mod undo {
     use super::*;
 
