@@ -130,7 +130,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             } else {
                 Allowed::Only(allow.into_iter().collect::<HashSet<_>>())
             };
-            let peer = Peer::new(store.load()?, allowed);
+            let peer = Peer::new(store.load()?, allowed, store.key()?.public().to_string());
             let endpoint = net.endpoint(&store).await?;
             match net.local {
                 Some(_) => println!(
@@ -151,7 +151,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             addr,
             net,
         } => {
-            let peer = Peer::new(store.load()?, Allowed::Only(HashSet::from([id])));
+            let peer = Peer::new(
+                store.load()?,
+                Allowed::Only(HashSet::from([id])),
+                store.key()?.public().to_string(),
+            );
             let endpoint = net.endpoint(&store).await?;
             let mut target = EndpointAddr::new(id);
             if let Some(addr) = addr {

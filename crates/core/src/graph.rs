@@ -174,10 +174,19 @@ impl Graph {
     }
 
     /// The version a replica reaches by applying `updates` (as made by
-    /// [`Graph::updates_since`]), as far as the updates themselves say.
+    /// [`Graph::updates_since`], or a snapshot), as far as they say.
     pub fn version_of_updates(updates: &[u8]) -> Result<Version> {
         Ok(Version(
             LoroDoc::decode_import_blob_meta(updates, false)?.partial_end_vv,
+        ))
+    }
+
+    /// Where a blob of updates, or a snapshot, starts: a replica can apply
+    /// it once it has reached this. (A blank replica can start from any
+    /// snapshot.)
+    pub fn start_of(blob: &[u8]) -> Result<Version> {
+        Ok(Version(
+            LoroDoc::decode_import_blob_meta(blob, false)?.partial_start_vv,
         ))
     }
 

@@ -4452,6 +4452,7 @@ dependencies = [
  "anyhow",
  "clap",
  "iroh",
+ "jiff",
  "quiddity-core",
  "quiddity-sync",
  "thiserror 2.0.21",
@@ -4462,6 +4463,7 @@ dependencies = [
 name = "quiddity-sync"
 version = "0.1.0"
 dependencies = [
+ "jiff",
  "quiddity-core",
  "thiserror 2.0.21",
 ]

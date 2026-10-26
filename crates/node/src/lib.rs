@@ -16,12 +16,13 @@ use std::time::Duration;
 use iroh::endpoint::{Connection, ConnectionError, ReadError, RecvStream, SendStream, WriteError};
 use iroh::protocol::{AcceptError, ProtocolHandler};
 use iroh::{Endpoint, EndpointAddr, EndpointId};
+use jiff::Timestamp;
 use quiddity_core::{Graph, Index, merge_duplicates};
 use quiddity_sync::{DecodeError, FrameError, FrameReader, Message, Session, State, write_frame};
 use tokio::sync::watch;
 
 /// The protocol's name, negotiated when connecting.
-pub const ALPN: &[u8] = b"quiddity/sync/1";
+pub const ALPN: &[u8] = b"quiddity/sync/2";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -41,6 +42,10 @@ pub enum Error {
     Sync(#[from] quiddity_sync::Error),
     #[error("the peer's graph uses schema {0:?}, which this build can't sync with")]
     Incompatible(Option<i64>),
+    #[error("this device is behind the peer's history: it needs to start again from a snapshot")]
+    Behind,
+    #[error("the peer is behind this device's history: it needs to start again from a snapshot")]
+    PeerBehind,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -68,6 +73,8 @@ pub struct Peer {
 
 #[derive(Debug)]
 struct Inner {
+    /// This device's ID in the graph's device list.
+    device: String,
     graph: Graph,
     allowed: Allowed,
     /// Bumped whenever the graph changes, so every connection flushes.
@@ -75,9 +82,12 @@ struct Inner {
 }
 
 impl Peer {
-    pub fn new(graph: Graph, allowed: Allowed) -> Self {
+    /// A peer for `graph`, as the device `device` (its ID in the graph's
+    /// device list: the endpoint ID, for a real device).
+    pub fn new(graph: Graph, allowed: Allowed, device: impl Into<String>) -> Self {
         Self {
             inner: Arc::new(Inner {
+                device: device.into(),
                 graph,
                 allowed,
                 changes: watch::Sender::new(0),
@@ -133,11 +143,11 @@ impl Peer {
         idle: Option<Duration>,
     ) -> Result<(), Error> {
         let graph = self.graph();
-        let mut session = Session::new();
+        let mut session = Session::new(self.inner.device.clone());
         let mut changes = self.subscribe();
         let mut reader = FrameReader::new();
         let mut buf = vec![0u8; 64 * 1024];
-        write(&mut send, &Session::hello(graph)).await?;
+        write(&mut send, &session.hello(graph)).await?;
 
         loop {
             let read = async {
@@ -159,11 +169,14 @@ impl Peer {
                             Err(e) => return Err(e.into()),
                         };
                         let is_updates = matches!(message, Message::Updates(_));
-                        for reply in session.receive(graph, message)? {
+                        for reply in session.receive(graph, message, Timestamp::now())? {
                             write(&mut send, &reply).await?;
                         }
-                        if let State::Incompatible { theirs } = session.state() {
-                            return Err(Error::Incompatible(*theirs));
+                        match session.state() {
+                            State::Incompatible { theirs } => return Err(Error::Incompatible(*theirs)),
+                            State::Behind => return Err(Error::Behind),
+                            State::PeerBehind => return Err(Error::PeerBehind),
+                            State::Starting | State::Syncing => {}
                         }
                         if is_updates {
                             self.changed();

@@ -160,6 +160,26 @@ fn compaction_leaves_behind_only_those_it_must() {
         Err(quiddity_core::Error::BeforeHistory)
     ));
     assert!(!compacted.can_update(&Graph::blank().version()));
+    // Its snapshot says where it starts, as updates say where they do.
+    assert_eq!(
+        Graph::start_of(&compacted.snapshot().unwrap()).unwrap(),
+        compacted.history_start()
+    );
+    assert_eq!(
+        Graph::start_of(&a.snapshot().unwrap()).unwrap(),
+        Version::default()
+    );
+    let updates = a.updates_since(&behind.version()).unwrap();
+    assert!(
+        behind
+            .version()
+            .includes(&Graph::start_of(&updates).unwrap())
+    );
+    assert!(
+        !Graph::blank()
+            .version()
+            .includes(&Graph::start_of(&updates).unwrap())
+    );
     let joined = Graph::from_snapshot(&compacted.snapshot().unwrap()).unwrap();
     assert_eq!(layout(&joined), layout(&a));
     // And from then on it syncs as usual.
