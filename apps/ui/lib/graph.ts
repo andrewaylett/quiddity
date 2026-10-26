@@ -9,6 +9,8 @@ export interface Backend {
 
 /** Views catch up this long after typing stops; structure changes at once. */
 const NOTIFY_MS = 120;
+/** Typing is one undo step until it pauses this long. */
+const TYPING_MS = 800;
 /** The shell hears of edits this long after the last one. */
 const PUSH_MS = 300;
 const RETRY_MS = 2000;
@@ -36,6 +38,7 @@ export class Graph {
   private pushing: Promise<void> = Promise.resolve();
   private pushTimer: ReturnType<typeof setTimeout> | undefined;
   private notifyTimer: ReturnType<typeof setTimeout> | undefined;
+  private typingTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private replica: Replica,
@@ -99,7 +102,18 @@ export class Graph {
 
   spliceText(id: string, pos: number, len: number, insert: string) {
     this.replica.spliceText(id, pos, len, insert);
+    clearTimeout(this.typingTimer);
+    this.typingTimer = setTimeout(() => this.replica.endTyping(), TYPING_MS);
     this.edited(undefined, true);
+  }
+
+  /** Undoes the latest step of the user's own edits. False if there is none. */
+  undo() {
+    return this.edited(this.replica.undo());
+  }
+
+  redo() {
+    return this.edited(this.replica.redo());
   }
 
   createBlock(parent: string, index: number | undefined, text: string) {
@@ -138,6 +152,10 @@ export class Graph {
     return day;
   }
 
+  clearUndo() {
+    this.replica.clearUndo();
+  }
+
   private schedulePush(delay = PUSH_MS) {
     clearTimeout(this.pushTimer);
     this.pushTimer = setTimeout(() => void this.flush(), delay);
@@ -173,6 +191,8 @@ export function bootGraph(): Promise<Graph> {
       : (await import("./backend-memory")).memoryBackend;
     const graph = new Graph(new Replica(await backend.load()), backend);
     graph.ensureToday();
+    // Making today's page isn't the user's doing, so it isn't theirs to undo.
+    graph.clearUndo();
     const save = () => void graph.flush();
     window.addEventListener("pagehide", save);
     document.addEventListener("visibilitychange", () => document.hidden && save());

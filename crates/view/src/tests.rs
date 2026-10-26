@@ -457,6 +457,114 @@ mod edits {
     }
 }
 
+mod undo {
+    use super::*;
+
+    /// A page whose edits can be undone.
+    fn undoable(blocks: &[&str]) -> (View, String, Vec<String>) {
+        let (v, page, ids) = page(blocks);
+        v.graph().enable_undo();
+        (v, page, ids)
+    }
+
+    #[test]
+    fn a_burst_of_typing_is_one_step_until_it_pauses() {
+        let (v, page, ids) = undoable(&["x"]);
+        for (i, c) in ["a", "b", "c"].iter().enumerate() {
+            v.splice_text(&ids[0], 1 + i, 0, c).unwrap();
+        }
+        v.end_typing();
+        v.splice_text(&ids[0], 4, 0, "!").unwrap();
+        assert_eq!(top_level(&v, &page), ["xabc!"]);
+        assert!(v.undo().unwrap());
+        assert_eq!(
+            top_level(&v, &page),
+            ["xabc"],
+            "the pause started a new step"
+        );
+        assert!(v.undo().unwrap());
+        assert_eq!(top_level(&v, &page), ["x"], "and the burst came away whole");
+        assert!(!v.undo().unwrap());
+        assert!(v.redo().unwrap() && v.redo().unwrap());
+        assert_eq!(top_level(&v, &page), ["xabc!"]);
+    }
+
+    #[test]
+    fn typing_then_structure_are_separate_steps() {
+        let (v, page, ids) = undoable(&["hello world"]);
+        v.splice_text(&ids[0], 11, 0, "!").unwrap();
+        v.split(&ids[0], 5).unwrap();
+        assert_eq!(top_level(&v, &page), ["hello", " world!"]);
+        assert!(v.undo().unwrap());
+        assert_eq!(top_level(&v, &page), ["hello world!"], "the split alone");
+        assert!(v.undo().unwrap());
+        assert_eq!(top_level(&v, &page), ["hello world"], "then the typing");
+    }
+
+    #[test]
+    fn a_merge_undoes_as_one_step_and_brings_both_blocks_back() {
+        let (v, page, ids) = undoable(&["first", "second"]);
+        v.merge_into_previous(&ids[1]).unwrap().unwrap();
+        assert_eq!(top_level(&v, &page), ["firstsecond"]);
+        assert!(v.undo().unwrap());
+        assert_eq!(top_level(&v, &page), ["first", "second"]);
+        assert!(v.redo().unwrap());
+        assert_eq!(top_level(&v, &page), ["firstsecond"]);
+    }
+
+    #[test]
+    fn moves_and_new_blocks_undo() {
+        let (v, page, ids) = undoable(&["a", "b", "c"]);
+        v.indent(&ids[1]).unwrap();
+        v.move_sibling(&ids[2], -1).unwrap();
+        v.create_block(&page, None, "d").unwrap();
+        assert!(v.undo().unwrap());
+        assert!(v.undo().unwrap());
+        assert!(v.undo().unwrap());
+        let e = v.entity(&page).unwrap();
+        assert_eq!(texts(&e.blocks), ["a", "b", "c"]);
+        assert!(e.blocks[0].children.is_empty(), "outdented again");
+    }
+
+    #[test]
+    fn undo_refreshes_the_index() {
+        let (v, _page, ids) = undoable(&["no link"]);
+        v.create_entity("Target").unwrap();
+        let target = id_of(&v, "Target");
+        v.splice_text(&ids[0], 0, 7, "see [[Target]]").unwrap();
+        assert_eq!(titles(&v.references(&target).unwrap()), ["Page"]);
+        assert!(v.undo().unwrap());
+        assert!(v.references(&target).unwrap().is_empty());
+        assert!(v.redo().unwrap());
+        assert_eq!(titles(&v.references(&target).unwrap()), ["Page"]);
+    }
+
+    #[test]
+    fn a_new_entity_is_one_step() {
+        let (v, _page, _ids) = undoable(&[]);
+        v.create_entity("Fresh").unwrap();
+        assert_eq!(v.entities().unwrap().len(), 2);
+        assert!(v.undo().unwrap());
+        assert_eq!(
+            titles_of(&v),
+            ["Page"],
+            "entity and its first block together"
+        );
+    }
+
+    fn titles_of(v: &View) -> Vec<String> {
+        v.entities().unwrap().into_iter().map(|e| e.title).collect()
+    }
+
+    #[test]
+    fn nothing_to_undo_is_not_an_error() {
+        let (v, _page, _ids) = page(&["x"]);
+        assert!(!v.undo().unwrap() && !v.redo().unwrap(), "undo not enabled");
+        v.graph().enable_undo();
+        assert!(!v.undo().unwrap() && !v.redo().unwrap(), "nothing yet");
+    }
+}
+
 mod text {
     use super::super::query::{contains_word, without_links};
 

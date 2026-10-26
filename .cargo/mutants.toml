@@ -8,8 +8,3 @@ gitignore = true
 # The WASM glue returns JavaScript values, so it only runs in a browser. What
 # it wraps (quiddity-view) is tested and mutation-tested natively.
 exclude_globs = ["crates/wasm/**"]
-exclude_re = [
-    # Loro commits pending edits itself when exporting, so a commit only
-    # marks a transaction boundary: nothing observes that until undo exists.
-    "replace Graph::commit with \\(\\)",
-]

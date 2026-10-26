@@ -1,10 +1,11 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::{Mutex, MutexGuard};
 
 use loro::{
     Container, ExportMode, LoroDoc, LoroText, LoroTree, LoroValue, TreeID, TreeParentId,
-    UpdateOptions, ValueOrContainer, VersionVector,
+    UndoManager, UpdateOptions, ValueOrContainer, VersionVector,
 };
 
 use crate::{Error, Result};
@@ -71,6 +72,8 @@ impl Version {
 #[derive(Debug)]
 pub struct Graph {
     doc: LoroDoc,
+    /// Present once [`Graph::enable_undo`] has been called.
+    undo: Mutex<Option<UndoManager>>,
 }
 
 impl Default for Graph {
@@ -97,7 +100,10 @@ impl Graph {
     pub fn blank() -> Self {
         let doc = LoroDoc::new();
         doc.get_tree(BLOCKS).enable_fractional_index(0);
-        Self { doc }
+        Self {
+            doc,
+            undo: Mutex::new(None),
+        }
     }
 
     /// Loads a replica from a snapshot.
@@ -208,6 +214,58 @@ impl Graph {
             return Err(Error::NotApplied);
         }
         Ok(())
+    }
+
+    fn undoer(&self) -> MutexGuard<'_, Option<UndoManager>> {
+        self.undo.lock().expect("undo lock poisoned")
+    }
+
+    /// Starts recording this replica's own edits so that they can be undone.
+    /// Edits made before this, and other replicas' edits, are never undone.
+    /// Each commit is one step, unless grouped (see
+    /// [`Graph::begin_undo_group`]), so a multi-block operation done in one
+    /// commit undoes as one unit.
+    pub fn enable_undo(&self) {
+        self.undoer()
+            .get_or_insert_with(|| UndoManager::new(&self.doc));
+    }
+
+    /// Undoes the latest step. False if there was nothing to undo, or undo
+    /// isn't enabled.
+    pub fn undo(&self) -> Result<bool> {
+        self.commit();
+        self.undoer().as_mut().map_or(Ok(false), |u| Ok(u.undo()?))
+    }
+
+    /// Redoes the step last undone. False if there is none.
+    pub fn redo(&self) -> Result<bool> {
+        self.commit();
+        self.undoer().as_mut().map_or(Ok(false), |u| Ok(u.redo()?))
+    }
+
+    /// Forgets everything that could be undone or redone.
+    pub fn clear_undo(&self) {
+        self.commit();
+        if let Some(undo) = self.undoer().as_ref() {
+            undo.clear();
+        }
+    }
+
+    /// Until [`Graph::end_undo_group`], the commits made are one undo step:
+    /// a burst of typing, say.
+    pub fn begin_undo_group(&self) -> Result<()> {
+        self.commit();
+        if let Some(undo) = self.undoer().as_mut() {
+            undo.group_start()?;
+        }
+        Ok(())
+    }
+
+    pub fn end_undo_group(&self) {
+        self.commit();
+        if let Some(undo) = self.undoer().as_mut() {
+            undo.group_end();
+        }
     }
 
     /// Ends the current transaction. Edits made since the last commit sync
@@ -417,6 +475,138 @@ mod tests {
             "a-B!",
             "a rejected splice changes nothing"
         );
+        Ok(())
+    }
+
+    fn texts(graph: &Graph, parent: BlockId) -> Result<Vec<String>> {
+        graph
+            .children(parent)
+            .into_iter()
+            .map(|b| graph.text(b))
+            .collect()
+    }
+
+    /// A graph with undo on and one entity with a block, ready to edit.
+    fn undoable() -> Result<(Graph, BlockId)> {
+        let graph = Graph::new();
+        let page = graph.create_block(None, None, "Page")?;
+        let block = graph.create_block(Some(page), None, "one")?;
+        graph.commit();
+        graph.enable_undo();
+        Ok((graph, block))
+    }
+
+    #[test]
+    fn each_commit_is_a_step_and_redo_replays_it() -> Result<()> {
+        let (graph, block) = undoable()?;
+        graph.splice_text(block, 3, 0, " two")?;
+        graph.commit();
+        graph.splice_text(block, 7, 0, " three")?;
+        graph.commit();
+        assert!(graph.undo()?);
+        assert_eq!(graph.text(block)?, "one two");
+        assert!(graph.undo()?);
+        assert_eq!(graph.text(block)?, "one");
+        assert!(!graph.undo()?, "nothing left");
+        assert!(graph.redo()?);
+        assert!(graph.redo()?);
+        assert_eq!(graph.text(block)?, "one two three");
+        assert!(!graph.redo()?);
+        Ok(())
+    }
+
+    #[test]
+    fn a_group_is_one_step() -> Result<()> {
+        let (graph, block) = undoable()?;
+        graph.begin_undo_group()?;
+        for (i, c) in ["a", "b", "c"].iter().enumerate() {
+            graph.splice_text(block, 3 + i, 0, c)?;
+            graph.commit();
+        }
+        graph.end_undo_group();
+        graph.splice_text(block, 6, 0, "!")?;
+        graph.commit();
+        assert!(graph.undo()?);
+        assert_eq!(graph.text(block)?, "oneabc", "the bang was its own step");
+        assert!(graph.undo()?);
+        assert_eq!(graph.text(block)?, "one", "and the group came away whole");
+        Ok(())
+    }
+
+    #[test]
+    fn structure_undoes_too() -> Result<()> {
+        let (graph, block) = undoable()?;
+        let page = graph.parent(block).unwrap();
+        let second = graph.create_block(Some(page), None, "two")?;
+        graph.commit();
+        graph.move_block(second, Some(block), None)?;
+        graph.commit();
+        assert_eq!(graph.parent(second), Some(block));
+        assert!(graph.undo()?);
+        assert_eq!(graph.parent(second), Some(page), "moved back");
+        assert!(graph.undo()?);
+        assert!(!graph.contains(second), "creation undone");
+        assert_eq!(texts(&graph, page)?, ["one"]);
+        assert!(graph.redo()?);
+        assert_eq!(
+            texts(&graph, page)?,
+            ["one", "two"],
+            "and redone, text and all"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn deleting_a_block_undoes_with_its_text() -> Result<()> {
+        let (graph, block) = undoable()?;
+        graph.splice_text(block, 3, 0, "!")?;
+        graph.commit();
+        graph.delete_block(block)?;
+        graph.commit();
+        assert!(!graph.contains(block));
+        assert!(graph.undo()?);
+        // Loro brings the block back, text and all, but as a new block: an id
+        // held across an undo of its deletion is dead.
+        let page = graph.roots()[0];
+        assert_eq!(texts(&graph, page)?, ["one!"]);
+        assert!(!graph.contains(block));
+        Ok(())
+    }
+
+    #[test]
+    fn only_this_replicas_edits_are_undone() -> Result<()> {
+        let (graph, block) = undoable()?;
+        let other = Graph::blank();
+        other.import(&graph.snapshot()?)?;
+        other.splice_text(block, 0, 0, "their ")?;
+        other.commit();
+        graph.import(&other.updates_since(&Version::default())?)?;
+        graph.splice_text(block, graph.text_len_utf16(block)?, 0, " mine")?;
+        graph.commit();
+        assert_eq!(graph.text(block)?, "their one mine");
+        assert!(graph.undo()?);
+        assert_eq!(graph.text(block)?, "their one");
+        assert!(!graph.undo()?, "theirs is not ours to undo");
+        Ok(())
+    }
+
+    #[test]
+    fn undo_can_be_cleared_and_is_off_until_enabled() -> Result<()> {
+        let (graph, block) = undoable()?;
+        graph.splice_text(block, 3, 0, "!")?;
+        graph.commit();
+        graph.clear_undo();
+        assert!(!graph.undo()?);
+        assert_eq!(graph.text(block)?, "one!");
+
+        let plain = Graph::new();
+        let page = plain.create_block(None, None, "P")?;
+        plain.commit();
+        assert!(!plain.undo()? && !plain.redo()?);
+        plain.begin_undo_group()?;
+        plain.end_undo_group();
+        plain.clear_undo();
+        assert!(plain.contains(page));
         Ok(())
     }
 

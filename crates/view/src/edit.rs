@@ -40,20 +40,54 @@ impl View {
         result
     }
 
+    /// Edits other than typing are each a step of their own, so they end any
+    /// burst of typing first.
+    fn structural(&self) {
+        self.end_typing();
+    }
+
+    /// Ends the burst of typing that [`View::splice_text`] opened, so the
+    /// next typing is a new undo step. The UI calls it when typing pauses.
+    pub fn end_typing(&self) {
+        if self.typing.replace(false) {
+            self.graph.end_undo_group();
+        }
+    }
+
+    /// Undoes the latest step of this replica's edits. False if there is none.
+    pub fn undo(&self) -> Result<bool> {
+        self.end_typing();
+        let undone = self.graph.undo();
+        self.edited(undone.map_err(Error::from))
+    }
+
+    /// Redoes the step last undone. False if there is none.
+    pub fn redo(&self) -> Result<bool> {
+        self.end_typing();
+        let redone = self.graph.redo();
+        self.edited(redone.map_err(Error::from))
+    }
+
     /// A block's current text.
     pub fn block_text(&self, id: &str) -> Result<String> {
         Ok(self.graph.text(self.block_id(id)?)?)
     }
 
     /// Replaces `len` UTF-16 units of a block's text from `pos` with `insert`.
+    ///
+    /// Typing between two calls to [`View::end_typing`] is one undo step.
     pub fn splice_text(&self, id: &str, pos: usize, len: usize, insert: &str) -> Result<()> {
         let block = self.block_id(id)?;
+        if !self.typing.replace(true) {
+            self.graph.begin_undo_group()?;
+        }
         let result = self.graph.splice_text(block, pos, len, insert);
         self.edited(result.map_err(Error::from))
     }
 
     /// Creates a block under `parent` at `index`, or at the end.
     pub fn create_block(&self, parent: &str, index: Option<usize>, text: &str) -> Result<String> {
+        self.structural();
         let parent = self.block_id(parent)?;
         let created = self.graph.create_block(Some(parent), index, text);
         self.edited(created.map(|b| b.to_string()).map_err(Error::from))
@@ -61,6 +95,7 @@ impl View {
 
     /// Creates an entity with an empty first block to type into.
     pub fn create_entity(&self, name: &str) -> Result<String> {
+        self.structural();
         let made = self.graph.create_entity(name, &[]).and_then(|entity| {
             self.graph.create_block(Some(entity), None, "")?;
             Ok(entity)
@@ -72,6 +107,7 @@ impl View {
     /// block, which is the first child if the block has children and the next
     /// sibling if not. Returns the new block.
     pub fn split(&self, id: &str, at: usize) -> Result<String> {
+        self.structural();
         let block = self.block_id(id)?;
         let text = self.graph.text(block)?;
         let byte = byte_offset(&text, at).ok_or(Error::BadOffset(at))?;
@@ -97,6 +133,7 @@ impl View {
     /// Makes a block the last child of the sibling before it. False if it has
     /// none.
     pub fn indent(&self, id: &str) -> Result<bool> {
+        self.structural();
         let block = self.block_id(id)?;
         let parent = self
             .graph
@@ -114,6 +151,7 @@ impl View {
     /// Makes a block the next sibling of its parent. False if its parent is
     /// the entity itself.
     pub fn outdent(&self, id: &str) -> Result<bool> {
+        self.structural();
         let block = self.block_id(id)?;
         let parent = self
             .graph
@@ -134,6 +172,7 @@ impl View {
     /// Swaps a block with the sibling `delta` places away (-1 is up). False
     /// if there is none.
     pub fn move_sibling(&self, id: &str, delta: isize) -> Result<bool> {
+        self.structural();
         let block = self.block_id(id)?;
         let parent = self
             .graph
@@ -155,6 +194,7 @@ impl View {
     /// order, and deletes it. Nothing happens, and `None` comes back, if it
     /// has children or nothing is before it in its entity.
     pub fn merge_into_previous(&self, id: &str) -> Result<Option<Merged>> {
+        self.structural();
         let block = self.block_id(id)?;
         if !self.graph.children(block).is_empty() {
             return Ok(None);

@@ -1,7 +1,7 @@
 "use client";
 
-import { defaultKeymap, history, historyKeymap, insertNewline } from "@codemirror/commands";
-import { Annotation, EditorState, Prec, Transaction } from "@codemirror/state";
+import { defaultKeymap, insertNewline } from "@codemirror/commands";
+import { Annotation, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap, type KeyBinding } from "@codemirror/view";
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { useEditing, type Caret, type Editing } from "./editing-context";
@@ -130,6 +130,10 @@ function outlinerKeys(id: string, latest: { current: Editing }): KeyBinding[] {
         return true;
       },
     },
+    // Undo is the graph's, so it covers structure and other blocks too.
+    { key: "Mod-z", run: () => (latest.current.graph.undo(), true) },
+    { key: "Mod-Shift-z", run: () => (latest.current.graph.redo(), true) },
+    { key: "Mod-y", run: () => (latest.current.graph.redo(), true) },
   ];
 }
 
@@ -167,10 +171,9 @@ export function BlockEditor({ id, caret }: { id: string; caret: Caret }) {
         doc,
         selection: { anchor },
         extensions: [
-          history(),
           EditorView.lineWrapping,
           Prec.highest(keymap.of(outlinerKeys(id, latest))),
-          keymap.of([...defaultKeymap, ...historyKeymap]),
+          keymap.of(defaultKeymap),
           EditorView.updateListener.of((update) => {
             if (!update.docChanged) return;
             if (update.transactions.some((t) => t.annotation(fromGraph))) return;
@@ -231,7 +234,7 @@ export function BlockEditor({ id, caret }: { id: string; caret: Caret }) {
     if (text === now) return;
     editor.dispatch({
       changes: diff(now, text),
-      annotations: [fromGraph.of(true), Transaction.addToHistory.of(false)],
+      annotations: fromGraph.of(true),
     });
   }, [graph, id, revision]);
 
