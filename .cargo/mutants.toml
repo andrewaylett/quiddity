@@ -1,0 +1,3 @@
+# cargo mutants: https://mutants.rs/
+test_tool = "nextest"
+additional_cargo_test_args = ["--profile", "mutants"]

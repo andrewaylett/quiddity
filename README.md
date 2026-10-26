@@ -57,7 +57,13 @@ Each layer is property-tested on its own, with system tests on top:
 ```sh
 cargo fmt --all --check
 cargo clippy --all-targets
-cargo test
-PROPTEST_CASES=5000 cargo test --release   # deeper
+cargo nextest run                          # or cargo test
+PROPTEST_CASES=5000 cargo nextest run --release   # deeper
 cargo +nightly fuzz run block              # or outline, peer
+PROPTEST_CASES=32 cargo mutants            # are the tests any good?
 ```
+
+`cargo mutants` changes the code one small way at a time and checks that
+some test notices. Each mutant is tested against its own crate's tests
+only, so every layer has to stand up on its own. CI runs it over the lines
+each pull request changes.

@@ -1,0 +1,18 @@
+# cargo nextest: https://nexte.st/docs/configuration/
+
+[profile.default]
+# The network tests talk over real sockets: a hang should fail, not stall.
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+[profile.ci]
+fail-fast = false
+failure-output = "immediate-final"
+
+[profile.ci.junit]
+path = "junit.xml"
+
+# Used by cargo mutants: stop at the first failure, which is all it needs.
+[profile.mutants]
+fail-fast = true
+failure-output = "never"
+success-output = "never"

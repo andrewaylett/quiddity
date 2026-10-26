@@ -177,7 +177,11 @@ fn layout(graph: &Graph) -> Vec<(BlockId, Option<BlockId>, String)> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(64))]
+    // 64 cases by default; PROPTEST_CASES overrides.
+    #![proptest_config(ProptestConfig {
+        cases: std::env::var("PROPTEST_CASES").ok().and_then(|c| c.parse().ok()).unwrap_or(64),
+        ..ProptestConfig::default()
+    })]
 
     #[test]
     fn devices_converge_through_relays(steps in vec(step(), 1..80)) {

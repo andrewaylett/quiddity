@@ -23,7 +23,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --locked
-      - run: cargo test --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: cargo nextest run --locked --profile ci
+      - run: cargo test --doc --locked
       - run: cargo doc --no-deps --locked
         env:
           RUSTDOCFLAGS: -D warnings
@@ -67,6 +71,29 @@ jobs:
         run: |
           cargo fmt --check
           cargo clippy --all-targets --locked
+
+  mutants:
+    # Every mutant in the lines a PR changes must be caught by some test.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-mutants
+      - run: git diff origin/${{ github.base_ref }}... > pr.diff
+      - run: cargo mutants --in-diff pr.diff --no-shuffle -j 2 --timeout-multiplier 3
+        env:
+          PROPTEST_CASES: 64
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants
+          path: mutants.out/
 
   fuzz:
     runs-on: ubuntu-latest
