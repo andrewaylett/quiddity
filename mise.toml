@@ -7,3 +7,74 @@ jj = "0.46.0"
 pinact = "5.0.2"
 # Must match the wasm-bindgen crate, which crates/wasm pins.
 "cargo:wasm-bindgen-cli" = "0.2.129"
+
+# `mise run <task>`; `mise tasks` lists them. `mise trust` once in a fresh
+# checkout, so that mise will read this file.
+
+[tasks.doctor]
+description = "Check the prerequisites mise can't install, such as Tauri's system libraries"
+run = "scripts/doctor.sh"
+
+[tasks.setup]
+description = "Install the JavaScript dependencies"
+run = "pnpm install"
+
+[tasks.app]
+description = "Build the desktop app and launch it, reloading as the UI changes"
+depends = ["setup", "doctor"]
+# Builds the graph replica (WASM), starts the UI's dev server, compiles the
+# Tauri shell and opens the window. The first run compiles a lot.
+run = "pnpm app dev"
+
+[tasks.ui]
+description = "Run the UI alone in a browser, on a made-up graph in memory"
+depends = ["setup", "doctor"]
+run = "pnpm ui dev"
+
+[tasks.wasm]
+description = "Rebuild the graph replica the UI embeds"
+depends = ["doctor"]
+run = "pnpm ui wasm"
+
+[tasks.build]
+description = "Build the desktop app for release"
+depends = ["setup", "doctor"]
+run = "pnpm app build"
+
+[tasks.node]
+description = "Run quiddity-node, the command line and headless sync node: mise run node -- --help"
+run = "cargo run -p quiddity-node --"
+
+[tasks.fmt]
+description = "Format the Rust code"
+run = "cargo fmt --all"
+
+[tasks."fmt:check"]
+description = "Check the Rust formatting"
+run = "cargo fmt --all --check"
+
+[tasks.lint]
+description = "Run clippy over the workspace and the shell"
+run = ["cargo clippy --workspace --all-targets --locked", "cargo clippy --manifest-path apps/app/src-tauri/Cargo.toml --all-targets --locked"]
+
+[tasks.typecheck]
+description = "Typecheck the UI"
+depends = ["setup", "doctor"]
+run = "pnpm ui typecheck"
+
+[tasks.test]
+description = "Run the Rust tests (the workspace, then the shell)"
+run = ["cargo nextest run --workspace --locked", "cargo test --manifest-path apps/app/src-tauri/Cargo.toml --locked"]
+
+[tasks.e2e]
+description = "Run the browser tests (installs Chromium for Playwright the first time)"
+depends = ["setup", "doctor"]
+run = [
+  "pnpm ui build",
+  "pnpm --filter @quiddity/ui exec playwright install chromium",
+  "pnpm ui test:e2e",
+]
+
+[tasks.check]
+description = "Everything CI checks, apart from fuzzing and mutation testing"
+depends = ["fmt:check", "lint", "test", "typecheck", "e2e"]

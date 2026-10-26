@@ -68,6 +68,12 @@ sends a mutant into a loop, check for the fast failure first.
 
 ### Tools
 
+- `mise tasks` lists the project's tasks: `mise run app` builds and launches
+  the app, `mise run check` runs what CI does apart from fuzzing and mutation
+  testing. They are defined in `mise.toml`; `scripts/doctor.sh` checks what mise
+  can't install (Tauri's system libraries on Linux) and is the first step of the
+  tasks that need it. Keep the tasks in step with CI when either changes.
+
 - The UI embeds the core compiled to WASM, so it needs the
   `wasm32-unknown-unknown` target and a `wasm-bindgen` CLI of exactly the
   version `crates/wasm` pins (`mise install` gets both). Browser tests need
