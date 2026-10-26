@@ -1,6 +1,8 @@
-use quiddity_syntax::{Property, Value, format_property_line, is_properties_block, parse_block};
+use quiddity_syntax::{
+    Property, Value, format_property_line, is_properties_block, normalise_name, parse_block,
+};
 
-use crate::{BlockId, Graph, Result};
+use crate::{BlockId, Error, Graph, Result};
 
 impl Graph {
     /// Creates an entity: a root block named `name`, with an initial
@@ -30,6 +32,59 @@ impl Graph {
             .unwrap_or("")
             .trim()
             .to_owned())
+    }
+
+    /// Renames an entity, keeping the old name as an `alias` so that links
+    /// written against it (including by a device that was offline) still
+    /// resolve. Returns false, and changes nothing, if the name is the same.
+    ///
+    /// Only the first line of `name` is used, as an entity's name is one line.
+    /// A name that differs only in case or spacing is a rename but needs no
+    /// alias, since names are matched that way anyway.
+    pub fn rename_entity(&self, entity: BlockId, name: &str) -> Result<bool> {
+        let name = name.lines().next().unwrap_or("").trim();
+        if name.is_empty() {
+            return Err(Error::EmptyName);
+        }
+        let old = self.entity_name(entity)?;
+        if name == old {
+            return Ok(false);
+        }
+        let aliases = self.aliases(entity)?;
+        self.set_text(entity, name)?;
+        let key = normalise_name(&old);
+        if !old.is_empty() && key != normalise_name(name) && !aliases.contains(&key) {
+            let line = format_property_line("alias", Some(&Value::Text(old)));
+            match self.properties_block(entity)? {
+                Some(block) => {
+                    let end = self.text_len_utf16(block)?;
+                    self.splice_text(block, end, 0, &format!("\n{line}"))?;
+                }
+                None => {
+                    self.create_block(Some(entity), Some(0), &line)?;
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    /// The entity's aliases, as names are matched.
+    fn aliases(&self, entity: BlockId) -> Result<Vec<String>> {
+        fn names(value: &Value, out: &mut Vec<String>) {
+            match value {
+                Value::Text(s) => out.push(normalise_name(s)),
+                Value::Link(link) => out.push(normalise_name(&link.name)),
+                Value::List(items) => items.iter().for_each(|v| names(v, out)),
+                Value::BlockRef(_) => {}
+            }
+        }
+        let mut out = Vec::new();
+        for p in self.entity_properties(entity)? {
+            if normalise_name(&p.key) == "alias" {
+                p.value.iter().for_each(|v| names(v, &mut out));
+            }
+        }
+        Ok(out)
     }
 
     /// The entity's initial properties block, if its first child is one.
@@ -105,6 +160,117 @@ mod tests {
         let plain = graph.create_entity("Plain", &[])?;
         graph.create_block(Some(plain), None, "not:: only\nproperties")?;
         assert_eq!(graph.properties_block(plain)?, None);
+        Ok(())
+    }
+
+    fn aliases_of(graph: &Graph, entity: BlockId) -> Vec<String> {
+        graph
+            .entity_properties(entity)
+            .unwrap()
+            .into_iter()
+            .filter(|p| p.key == "alias")
+            .filter_map(|p| match p.value {
+                Some(Value::Text(s)) => Some(s),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn renaming_keeps_the_old_name_as_an_alias() -> Result<()> {
+        let graph = Graph::new();
+        let jane = graph.create_entity("Jane", &[("type", text("person"))])?;
+        assert!(graph.rename_entity(jane, "Jane Doe")?);
+        assert_eq!(graph.entity_name(jane)?, "Jane Doe");
+        assert_eq!(aliases_of(&graph, jane), ["Jane"]);
+        assert_eq!(
+            graph.text(graph.properties_block(jane)?.unwrap())?,
+            "type:: person\nalias:: Jane",
+            "added to the properties block"
+        );
+        // A second rename adds another, and the first stays.
+        assert!(graph.rename_entity(jane, "J. Doe")?);
+        assert_eq!(aliases_of(&graph, jane), ["Jane", "Jane Doe"]);
+        Ok(())
+    }
+
+    #[test]
+    fn an_entity_with_no_properties_block_gets_one_first() -> Result<()> {
+        let graph = Graph::new();
+        let page = graph.create_entity("Old", &[])?;
+        let note = graph.create_block(Some(page), None, "a note")?;
+        graph.rename_entity(page, "New")?;
+        let first = graph.children(page)[0];
+        assert_eq!(graph.text(first)?, "alias:: Old");
+        assert_eq!(graph.properties_block(page)?, Some(first));
+        assert_eq!(graph.children(page)[1], note, "ahead of the note");
+        Ok(())
+    }
+
+    #[test]
+    fn the_same_name_changes_nothing_and_an_empty_one_is_refused() -> Result<()> {
+        let graph = Graph::new();
+        let page = graph.create_entity("Page", &[])?;
+        let before = graph.version();
+        assert!(!graph.rename_entity(page, "  Page \n second line")?);
+        assert_eq!(graph.version(), before);
+        for empty in ["", "   ", "\nsecond"] {
+            assert!(matches!(
+                graph.rename_entity(page, empty),
+                Err(Error::EmptyName)
+            ));
+        }
+        assert_eq!(graph.entity_name(page)?, "Page");
+        Ok(())
+    }
+
+    #[test]
+    fn only_the_first_line_of_a_name_is_used() -> Result<()> {
+        let graph = Graph::new();
+        let page = graph.create_entity("Old", &[])?;
+        graph.rename_entity(page, "  New name  \nignored")?;
+        assert_eq!(graph.text(page)?, "New name");
+        Ok(())
+    }
+
+    #[test]
+    fn a_change_of_case_or_spacing_is_a_rename_without_an_alias() -> Result<()> {
+        let graph = Graph::new();
+        let page = graph.create_entity("my page", &[])?;
+        assert!(graph.rename_entity(page, "My Page")?);
+        assert_eq!(graph.entity_name(page)?, "My Page");
+        assert_eq!(graph.properties_block(page)?, None, "nothing to alias");
+        Ok(())
+    }
+
+    #[test]
+    fn a_name_already_an_alias_is_not_added_again() -> Result<()> {
+        let graph = Graph::new();
+        let page = graph.create_entity("Alpha", &[("alias", text("Beta"))])?;
+        graph.rename_entity(page, "Beta")?;
+        graph.rename_entity(page, "Alpha")?;
+        // Alpha was added when it stopped being the name; Beta was there.
+        assert_eq!(aliases_of(&graph, page), ["Beta", "Alpha"]);
+
+        // Aliases written as a list count, and are matched as names are.
+        let listed = Value::List(vec![Value::Text("X".into()), Value::Text("Y".into())]);
+        let page = graph.create_entity("P", &[("alias", Some(listed))])?;
+        graph.rename_entity(page, "y")?;
+        graph.rename_entity(page, "Z")?;
+        let alias_lines = |p| -> usize {
+            let props = graph.entity_properties(p).unwrap();
+            props.iter().filter(|p| p.key == "alias").count()
+        };
+        assert_eq!(alias_lines(page), 2, "the list, and P; `y` was already Y");
+        Ok(())
+    }
+
+    #[test]
+    fn awkward_old_names_survive_as_aliases() -> Result<()> {
+        let graph = Graph::new();
+        let page = graph.create_entity("a, b [c] #d", &[])?;
+        graph.rename_entity(page, "Plain")?;
+        assert_eq!(aliases_of(&graph, page), ["a, b [c] #d"]);
         Ok(())
     }
 

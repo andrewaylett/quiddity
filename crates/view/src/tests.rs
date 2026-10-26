@@ -561,6 +561,90 @@ mod properties {
     }
 }
 
+mod rename {
+    use super::*;
+
+    #[test]
+    fn links_to_the_old_name_still_resolve() {
+        let v = view_with(|g| {
+            g.create_entity("Old name", &[]).unwrap();
+            let other = g.create_entity("Other", &[]).unwrap();
+            note(g, other, "see [[Old name]]");
+        });
+        let id = id_of(&v, "Old name");
+        assert!(v.rename_entity(&id, "New name").unwrap());
+        let e = v.entity(&id).unwrap();
+        assert_eq!(e.title, "New name");
+        assert_eq!(e.id, id, "the same entity");
+        assert_eq!(titles(&v.references(&id).unwrap()), ["Other"]);
+        let other = v.entity(&id_of(&v, "Other")).unwrap();
+        assert_eq!(other.links["Old name"], LinkTarget::Entity { id });
+    }
+
+    #[test]
+    fn the_old_name_is_visible_as_an_alias_in_the_properties() {
+        let (v, page, _) = page(&["a note"]);
+        v.rename_entity(&page, "Renamed").unwrap();
+        let e = v.entity(&page).unwrap();
+        assert_eq!(e.blocks[0].text, "alias:: Page");
+        assert_eq!(e.blocks[0].properties[0].key, "alias");
+        assert_eq!(texts(&e.blocks), ["alias:: Page", "a note"]);
+    }
+
+    #[test]
+    fn the_same_name_and_an_empty_one_do_nothing() {
+        let (v, page, _) = page(&["x"]);
+        assert!(!v.rename_entity(&page, "Page").unwrap());
+        assert!(v.rename_entity(&page, "  ").is_err());
+        assert_eq!(v.entity(&page).unwrap().title, "Page");
+        assert_eq!(top_level(&v, &page), ["x"], "no alias was added");
+    }
+
+    #[test]
+    fn journals_and_property_entities_cannot_be_renamed() {
+        let v = view_with(|g| {
+            g.create_entity("rating", &[("type", text("property"))])
+                .unwrap();
+            g.create_entity("Ordinary", &[]).unwrap();
+        });
+        let day = v.ensure_journal(today()).unwrap();
+        let rating = id_of(&v, "rating");
+        for id in [&day.id, &rating] {
+            assert!(!v.entity(id).unwrap().renamable);
+            assert!(matches!(
+                v.rename_entity(id, "x"),
+                Err(Error::NotRenamable(_))
+            ));
+        }
+        assert_eq!(v.entity(&day.id).unwrap().title, "2026-10-26", "untouched");
+        assert!(v.entity(&id_of(&v, "Ordinary")).unwrap().renamable);
+    }
+
+    #[test]
+    fn only_entities_can_be_renamed() {
+        let (v, _page, ids) = page(&["x"]);
+        assert!(matches!(
+            v.rename_entity(&ids[0], "y"),
+            Err(Error::NotAnEntity(_))
+        ));
+        assert!(v.rename_entity("junk", "y").is_err());
+    }
+
+    #[test]
+    fn a_rename_ends_a_burst_of_typing_and_undoes_as_one_step() {
+        let (v, page, ids) = page(&["x"]);
+        v.graph().enable_undo();
+        v.splice_text(&ids[0], 1, 0, "y").unwrap();
+        v.rename_entity(&page, "Renamed").unwrap();
+        assert!(v.undo().unwrap());
+        let e = v.entity(&page).unwrap();
+        assert_eq!(e.title, "Page", "the name and the alias came back together");
+        assert_eq!(texts(&e.blocks), ["xy"], "and the typing was its own step");
+        assert!(v.redo().unwrap());
+        assert_eq!(v.entity(&page).unwrap().title, "Renamed");
+    }
+}
+
 mod undo {
     use super::*;
 

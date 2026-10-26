@@ -170,6 +170,13 @@ impl Replica {
         Ok(self.view.create_entity(name)?)
     }
 
+    /// Renames an entity, keeping the old name as an alias. False if the name
+    /// is the same.
+    #[wasm_bindgen(js_name = renameEntity)]
+    pub fn rename_entity(&self, id: &str, name: &str) -> Result<bool, JsError> {
+        Ok(self.view.rename_entity(id, name)?)
+    }
+
     /// Splits a block at `at`; returns the new block.
     pub fn split(&self, id: &str, at: usize) -> Result<String, JsError> {
         Ok(self.view.split(id, at)?)

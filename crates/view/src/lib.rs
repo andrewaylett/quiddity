@@ -24,6 +24,8 @@ pub enum Error {
     NotABlock(String),
     #[error("{0:?} is not an entity")]
     NotAnEntity(String),
+    #[error("{0:?} is identified by its name or date, so it can't be renamed")]
+    NotRenamable(String),
     #[error("{0:?} is not a date")]
     NotADate(String),
     #[error("offset {0} is not between characters")]

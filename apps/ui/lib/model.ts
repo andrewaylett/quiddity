@@ -40,6 +40,9 @@ export type LinkTarget =
   | { kind: "missing" };
 
 export interface Entity extends EntityRef {
+  /** False for journals and property entities: their date or name is what
+   * identifies them. */
+  renamable: boolean;
   blocks: Block[];
   /** Keyed by the text between a link's brackets. */
   links: Record<string, LinkTarget>;

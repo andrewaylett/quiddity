@@ -103,6 +103,23 @@ impl View {
         self.edited(made.map(|e| e.to_string()).map_err(Error::from))
     }
 
+    /// Renames an entity, keeping the old name as an alias so that links to it
+    /// still resolve. Returns false if the name is the same. A journal or
+    /// property entity is identified by its date or name and can't be renamed.
+    pub fn rename_entity(&self, id: &str, name: &str) -> Result<bool> {
+        self.structural();
+        let entity = self.entity_id(id)?;
+        let renamable = self
+            .index()?
+            .entity(entity)
+            .is_some_and(|e| e.identity().is_none());
+        if !renamable {
+            return Err(Error::NotRenamable(id.to_owned()));
+        }
+        let renamed = self.graph.rename_entity(entity, name);
+        self.edited(renamed.map_err(Error::from))
+    }
+
     /// Splits a block at `at` (UTF-16 units): the text after it moves to a new
     /// block, which is the first child if the block has children and the next
     /// sibling if not. Returns the new block.

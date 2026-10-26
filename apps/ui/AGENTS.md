@@ -57,6 +57,10 @@ the current entity in the middle, open secondaries on the right.
 - IDs held by editing state go dead across an undo of a deletion; that just
   ends the edit.
 
+- The main pane's title (`EditableTitle`) renames in place when the entity
+  is `renamable`: Enter or leaving the field keeps it, Escape drops it. Side
+  cards and the journals feed show plain titles.
+
 ## Rendering
 
 `RenderedBlock` is how a block reads when not being edited: `splitBlock` takes
@@ -78,6 +82,8 @@ if the page logs an error. Pitfalls:
 
 - The sidebar repeats names (Favourites, Recents), so scope a link locator to
   `main` before `.first()`.
+- On the in-memory graph a page reload starts over, so a test that has changed
+  something must move by clicking (the sidebar), not `page.goto`.
 - A block's rendered text is `[data-block-text]` and an editor is `.cm-content`.
 - Typing `\n` presses Enter, which splits the block; use Shift-Enter for a
   newline. Press `Control+Shift+Z`, not `Control+Shift+z`: Playwright otherwise

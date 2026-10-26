@@ -124,6 +124,11 @@ export class Graph {
     return this.edited(this.replica.createEntity(name));
   }
 
+  /** Renames an entity, keeping the old name as an alias. */
+  renameEntity(id: string, name: string) {
+    return this.edited(this.replica.renameEntity(id, name));
+  }
+
   /** Splits a block at `at`; returns the new block. */
   split(id: string, at: number) {
     return this.edited(this.replica.split(id, at));

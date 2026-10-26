@@ -117,6 +117,9 @@ pub enum LinkTarget {
 pub struct Entity {
     pub id: String,
     pub title: String,
+    /// False for journals and property entities, which are identified by
+    /// their date or name.
+    pub renamable: bool,
     pub blocks: Vec<Block>,
     /// Every link in the entity's blocks, keyed by the text between the
     /// brackets as the syntax crate writes it. Links written some other way
@@ -136,7 +139,7 @@ pub struct Reference {
 }
 
 impl View {
-    fn entity_id(&self, id: &str) -> Result<BlockId> {
+    pub(crate) fn entity_id(&self, id: &str) -> Result<BlockId> {
         let bad = || Error::NotAnEntity(id.to_owned());
         let id: BlockId = id.parse().map_err(|_| bad())?;
         if !self.graph.contains(id) || self.graph.parent(id).is_some() {
@@ -223,9 +226,14 @@ impl View {
             .into_iter()
             .map(|child| self.block(child, &mut links))
             .collect::<Result<_>>()?;
+        let renamable = self
+            .index()?
+            .entity(id)
+            .is_some_and(|e| e.identity().is_none());
         Ok(Entity {
             id: id.to_string(),
             title: self.graph.entity_name(id)?,
+            renamable,
             blocks,
             links,
         })
