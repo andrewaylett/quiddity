@@ -33,9 +33,12 @@ the current entity in the middle, open secondaries on the right.
   pane, has its own `Suspense` and error boundary (`Region`): a slow or broken
   one holds up nothing else. A card's header sits outside its content's
   boundary so it can always be closed.
-- **The graph only exists in the browser**, so pages that read it render
-  inside `ClientOnly` and aren't prerendered; prerendering never has to wait
-  for it.
+- **The graph only exists in the browser**, so everything that reads it (the
+  page, and both sidebars) renders inside `ClientOnly` and isn't prerendered.
+  A static export never renders them on a server, but **`next dev` does, on
+  every request**: a pane left outside `ClientOnly` works in the export and
+  fails in development with a server error. The `e2e-dev` tests exist for
+  this.
 
 ## Editing
 
@@ -76,8 +79,11 @@ Block text comes from other devices and is untrusted, so:
 
 ## Tests
 
-Playwright, against the static export (`pnpm ui build`, then `pnpm ui test:e2e`).
-Each test starts from the same made-up graph. `e2e/fixtures.ts` fails a test
+Playwright (`pnpm ui build`, then `pnpm ui test:e2e`). Most tests (`e2e`)
+run against the static export; a few (`e2e-dev`) run against `next dev`, which
+renders on a server as the app does in development, and also shows React
+warnings that a production build hides (duplicate keys, say), which the page
+logging them fails the test. Each test starts from the same made-up graph. `e2e/fixtures.ts` fails a test
 if the page logs an error. Pitfalls:
 
 - The sidebar repeats names (Favourites, Recents), so scope a link locator to
