@@ -1,0 +1,23 @@
+[package]
+name = "quiddity-node"
+description = "Sync Quiddity graphs between devices over iroh, and a headless sync node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version = "1.91"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+iroh = "1.4"
+quiddity-core.workspace = true
+quiddity-sync = { path = "../sync" }
+thiserror.workspace = true
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
