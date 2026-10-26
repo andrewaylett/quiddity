@@ -14,21 +14,24 @@ use quiddity_syntax::{
 
 /// Text weighted towards the characters that mean something to the parser.
 fn any_text() -> impl Strategy<Value = String> {
-    prop_oneof![r#"[ a-z#()\[\],"\\:\n]{0,12}"#, any::<String>(),]
+    prop_oneof![r#"[ a-z#()\[\],"\\:\n\r]{0,12}"#, any::<String>(),]
 }
 
-/// A key usable after `#`: trimmed, no brackets, no newlines.
+/// A key usable after `#`: trimmed, no brackets, no line breaks.
 fn inline_key() -> impl Strategy<Value = String> {
-    r"[^\[\]\n]{1,10}".prop_filter("trimmed", |k| !k.is_empty() && k.trim() == k)
+    r"[^\[\]\n\r]{1,10}".prop_filter("trimmed", |k| !k.is_empty() && k.trim() == k)
 }
 
 /// A key usable in a `key:: value` line.
 fn line_key() -> impl Strategy<Value = String> {
-    r"[\p{L}\p{N}_][^:#\[\]()\n]{0,10}".prop_filter("no trailing space", |k| k.trim_end() == k)
+    r"[\p{L}\p{N}_][^:#\[\]()\n\r]{0,10}".prop_filter("no trailing space", |k| k.trim_end() == k)
 }
 
+/// A link name, weighted towards the characters that need escaping. Names
+/// are single lines: they're titles, written with whitespace collapsed.
 fn link_name() -> impl Strategy<Value = String> {
-    r"[^\n]{1,12}".prop_filter("trimmed", |n| !n.is_empty() && n.trim() == n)
+    prop_oneof![r#"[a-z_#\[\]\\ ]{1,8}"#, r"[^\n\r]{1,12}"]
+        .prop_filter("trimmed", |n| !n.is_empty() && n.trim() == n)
 }
 
 fn block_ref_id() -> impl Strategy<Value = String> {
@@ -115,7 +118,7 @@ proptest! {
     #[test]
     fn property_lines_round_trip(key in line_key(), value in option::of(value())) {
         let line = format_property_line(&key, value.as_ref());
-        prop_assert!(!line.contains('\n'), "{}", line);
+        prop_assert!(!line.contains(['\n', '\r']), "{:?}", line);
         prop_assert_eq!(parse_property_line(&line), Some((key, value)), "{}", line);
     }
 

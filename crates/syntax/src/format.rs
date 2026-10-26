@@ -120,7 +120,10 @@ fn reparse(raw: &str, ctx: Context) -> Option<Value> {
     match ctx {
         Context::Paren => single_inline_value(&format!("#k({raw})")),
         Context::ListItem => match single_inline_value(&format!("#k([{raw}])")) {
-            Some(Value::List(mut items)) if items.len() == 1 => items.pop(),
+            Some(Value::List(items)) => match <[Value; 1]>::try_from(items) {
+                Ok([item]) => Some(item),
+                Err(_) => None,
+            },
             _ => None,
         },
         Context::Line => Some(parse_line_value(raw)),
@@ -129,7 +132,9 @@ fn reparse(raw: &str, ctx: Context) -> Option<Value> {
 
 fn single_inline_value(src: &str) -> Option<Value> {
     match parse_block(src).properties.as_slice() {
-        [p] if p.span == (0..src.len()) => p.value.clone(),
+        // No need to check the span: the caller compares the value with the
+        // whole of what was wrapped, so a property that ended early differs.
+        [p] => p.value.clone(),
         _ => None,
     }
 }

@@ -11,8 +11,9 @@ failure-output = "immediate-final"
 [profile.ci.junit]
 path = "junit.xml"
 
-# Used by cargo mutants: stop at the first failure, which is all it needs.
+# Used by cargo mutants: stop at the first failure, which is all it needs,
+# without waiting for tests the mutant has sent into a loop.
 [profile.mutants]
-fail-fast = true
+fail-fast = { max-fail = 1, terminate = "immediate" }
 failure-output = "never"
 success-output = "never"

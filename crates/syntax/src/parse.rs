@@ -645,6 +645,8 @@ mod tests {
         assert_eq!(parse_line_value(r"C:\Users\me"), text(r"C:\Users\me"));
         assert_eq!(parse_line_value("\"unterminated"), text("\"unterminated"));
         assert_eq!(parse_line_value("[unterminated"), text("[unterminated"));
+        assert_eq!(parse_line_value("[a] and more"), text("[a] and more"));
+        assert_eq!(parse_line_value("\"a\" b"), text("\"a\" b"));
     }
 
     #[test]
@@ -669,6 +671,11 @@ mod tests {
         let two = vec![prop("p", Some(text("a"))), prop("p", Some(text("b")))];
         assert_eq!(props("#p(a)#p(b)"), two);
         assert_eq!(props("#p(a) #p(b)"), two);
+        assert_eq!(
+            props("#p(a)x#q"),
+            vec![prop("p", Some(text("a")))],
+            "only directly after a property"
+        );
         assert_eq!(props("#p(\"a)b\")"), vec![prop("p", Some(text("a)b")))]);
         assert_eq!(props(r"#p(a\)b)"), vec![prop("p", Some(text("a)b")))]);
         assert_eq!(props("#p(f(x))"), vec![prop("p", Some(text("f(x)")))]);
@@ -699,6 +706,10 @@ mod tests {
             "`#code`",
             "``a `#b` c``",
             r"\#escaped",
+            "#[[ ]]",
+            "#[[a[b]]",
+            "``a #b`` c",
+            "`a`` #b` c",
             "```\n#fenced\n```",
             "~~~~\n#fenced\n~~~\n#still\n~~~~",
         ] {
@@ -711,6 +722,9 @@ mod tests {
         assert_eq!(props("`code` #tag"), vec![prop("tag", None)]);
         assert_eq!(props("```\nx\n```\n#tag"), vec![prop("tag", None)]);
         assert_eq!(props("(#tag)"), vec![prop("tag", None)]);
+        assert_eq!(props("unclosed `` #tag"), vec![prop("tag", None)]);
+        assert_eq!(props("not a link [[ #tag"), vec![prop("tag", None)]);
+        assert_eq!(props("not a ref (( #tag"), vec![prop("tag", None)]);
         assert_eq!(props("#tag."), vec![prop("tag", None)]);
         assert_eq!(props("#v1.2"), vec![prop("v1.2", None)]);
         assert_eq!(props("#area/work"), vec![prop("area/work", None)]);
@@ -783,8 +797,11 @@ mod tests {
 
     #[test]
     fn block_refs() {
-        let block = parse_block("As ((0198f0c4-aaaa)) said, (( not a ref )), `((code))`");
-        assert_eq!(block.block_refs, vec!["0198f0c4-aaaa".to_owned()]);
+        let block = parse_block("As ((0198f0c4-aaaa)) said, (( not a ref )), `((code))`, [((b))]");
+        assert_eq!(
+            block.block_refs,
+            vec!["0198f0c4-aaaa".to_owned(), "b".to_owned()]
+        );
     }
 
     #[test]
