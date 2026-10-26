@@ -45,15 +45,33 @@ stops holding that back.
 
 ## The app
 
+With [mise](https://mise.jdx.dev) the whole thing is one command in a fresh
+checkout:
+
 ```sh
-pnpm install
+mise trust           # once, so that mise reads mise.toml
+mise run app         # installs what's needed, builds and opens the app
+```
+
+The first run installs the toolchain (Rust with the WASM target, Node, pnpm
+and a `wasm-bindgen` CLI) and compiles a lot, so it takes a while. On Linux
+Tauri also needs system libraries that mise can't install; `mise run doctor`
+says what is missing and how to get it (it runs first, so `mise run app` stops
+with the same message rather than a compiler error). `mise tasks` lists the
+rest: `ui` (the UI alone in a browser), `check` (what CI checks), `test`,
+`e2e`, `fmt`, `lint`, `build`, `wasm` and `node`.
+
+Without mise, `pnpm install` and then:
+
+```sh
 pnpm ui dev          # the UI alone, in a browser, at http://localhost:3000
 pnpm app dev         # the Tauri shell around it (needs Tauri's system packages)
 ```
 
 The UI embeds the graph replica, which is built from `crates/wasm`, so it needs
 the `wasm32-unknown-unknown` Rust target and a `wasm-bindgen` CLI matching the
-version in `crates/wasm/Cargo.toml` (`mise install` gets both). `pnpm ui wasm`
+version in `crates/wasm/Cargo.toml` (`mise install` gets both, the CLI by
+compiling it). `pnpm ui wasm`
 rebuilds it; `dev`, `build` and `typecheck` do so first.
 
 The shell opens the one graph in the app's data directory, creating it if
