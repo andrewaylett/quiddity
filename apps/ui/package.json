@@ -10,7 +10,8 @@
     "prebuild": "pnpm wasm",
     "build": "next build",
     "pretypecheck": "pnpm wasm",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
@@ -23,10 +24,12 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "serve": "14.2.6",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.0"
   }

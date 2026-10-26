@@ -84,8 +84,17 @@ function Entrypoints() {
   );
 }
 
+/** Recents are kept on this device, so they can outlive what they point at
+ * (a different graph, an undone creation): only those still there are shown,
+ * under their current names. */
 function Recents() {
-  return <Items items={useRecents()} />;
+  const recents = useRecents();
+  const names = useRead((g) => new Map(g.entities().map((e) => [e.id, e.title])));
+  const items = recents.flatMap((r) => {
+    const title = names.get(r.id);
+    return title === undefined ? [] : [{ id: r.id, title }];
+  });
+  return <Items items={items} />;
 }
 
 export function LeftSidebar() {
@@ -103,7 +112,9 @@ export function LeftSidebar() {
         </Region>
       </Section>
       <Section title="Recents">
-        <Recents />
+        <Region pending={listSkeleton} failed={failed}>
+          <Recents />
+        </Region>
       </Section>
     </nav>
   );
