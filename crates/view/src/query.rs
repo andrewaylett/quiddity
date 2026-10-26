@@ -1,0 +1,333 @@
+//! The read side: entities, journals, favourites and references.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use jiff::civil::Date;
+use quiddity_core::schema::{Typed, coerce};
+use quiddity_core::syntax::{Value, format_link, is_properties_block, parse_block};
+use quiddity_core::{BlockId, Identity, Resolution, ensure_journal};
+use serde::Serialize;
+
+use crate::{Error, Result, View};
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityRef {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Block {
+    pub id: String,
+    pub text: String,
+    pub children: Vec<Block>,
+}
+
+/// Where a `[[link]]` goes.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum LinkTarget {
+    Entity { id: String },
+    Ambiguous { ids: Vec<String> },
+    Missing,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Entity {
+    pub id: String,
+    pub title: String,
+    pub blocks: Vec<Block>,
+    /// Every link in the entity's blocks, keyed by the text between the
+    /// brackets as the syntax crate writes it. Links written some other way
+    /// are not found here and render as unresolved.
+    pub links: BTreeMap<String, LinkTarget>,
+}
+
+/// The blocks of one entity that mention another.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Reference {
+    pub source: EntityRef,
+    /// Each with its children, for context.
+    pub blocks: Vec<Block>,
+    /// As [`Entity::links`], for the links in these blocks.
+    pub links: BTreeMap<String, LinkTarget>,
+}
+
+impl View {
+    fn entity_id(&self, id: &str) -> Result<BlockId> {
+        let bad = || Error::NotAnEntity(id.to_owned());
+        let id: BlockId = id.parse().map_err(|_| bad())?;
+        if !self.graph.contains(id) || self.graph.parent(id).is_some() {
+            return Err(bad());
+        }
+        Ok(self.index()?.canonical(id))
+    }
+
+    fn entity_ref(&self, id: BlockId) -> Result<EntityRef> {
+        Ok(EntityRef {
+            id: id.to_string(),
+            title: self.graph.entity_name(id)?,
+        })
+    }
+
+    /// Entities that are not merged into another, by name.
+    pub fn entities(&self) -> Result<Vec<EntityRef>> {
+        let index = self.index()?;
+        let mut refs = index
+            .entities()
+            .filter(|e| index.canonical(e.id) == e.id)
+            .map(|e| self.entity_ref(e.id))
+            .collect::<Result<Vec<_>>>()?;
+        refs.sort_by_cached_key(|e| (e.title.to_lowercase(), e.id.clone()));
+        Ok(refs)
+    }
+
+    /// Entities whose `favourite` property is true.
+    pub fn favourites(&self) -> Result<Vec<EntityRef>> {
+        let index = self.index()?;
+        let schema = index.schema("favourite");
+        let mut favourites = Vec::new();
+        for entity in index.entities() {
+            let favourite = entity
+                .values("favourite")
+                .any(|v| matches!(coerce(v, &schema), Ok(Typed::Boolean(true))));
+            if favourite && index.canonical(entity.id) == entity.id {
+                favourites.push(self.entity_ref(entity.id)?);
+            }
+        }
+        favourites.sort_by_cached_key(|e| (e.title.to_lowercase(), e.id.clone()));
+        Ok(favourites)
+    }
+
+    /// Journal pages from `today` back, newest first.
+    pub fn journals(&self, today: Date) -> Result<Vec<EntityRef>> {
+        let index = self.index()?;
+        let mut days: Vec<_> = index
+            .entities()
+            .filter(|e| index.canonical(e.id) == e.id)
+            .filter_map(|e| match e.identity() {
+                Some(Identity::Journal(date)) if date <= today => Some((date, e.id)),
+                _ => None,
+            })
+            .collect();
+        days.sort_by(|a, b| b.cmp(a));
+        days.into_iter()
+            .map(|(_, id)| self.entity_ref(id))
+            .collect()
+    }
+
+    /// The journal page for `today`, created if there isn't one.
+    pub fn ensure_journal(&self, today: Date) -> Result<EntityRef> {
+        let existing = self.index()?.journal(today);
+        let id = match existing {
+            Some(id) => id,
+            None => {
+                let id = ensure_journal(&self.graph, &*self.index()?, today)?;
+                self.graph.commit();
+                self.changed();
+                id
+            }
+        };
+        let id = self.index()?.canonical(id);
+        self.entity_ref(id)
+    }
+
+    pub fn entity(&self, id: &str) -> Result<Entity> {
+        let id = self.entity_id(id)?;
+        let mut links = BTreeMap::new();
+        let blocks = self
+            .graph
+            .children(id)
+            .into_iter()
+            .map(|child| self.block(child, &mut links))
+            .collect::<Result<_>>()?;
+        Ok(Entity {
+            id: id.to_string(),
+            title: self.graph.entity_name(id)?,
+            blocks,
+            links,
+        })
+    }
+
+    fn block(&self, id: BlockId, links: &mut BTreeMap<String, LinkTarget>) -> Result<Block> {
+        let text = self.graph.text(id)?;
+        let index = self.index()?;
+        for link in parse_block(&text).links {
+            let written = format_link(&link);
+            let key = written
+                .strip_prefix("[[")
+                .and_then(|s| s.strip_suffix("]]"))
+                .unwrap_or(&written)
+                .to_owned();
+            let target = match index.resolve(&link) {
+                Resolution::Unique(id) => LinkTarget::Entity {
+                    id: index.canonical(id).to_string(),
+                },
+                Resolution::Ambiguous(ids) => LinkTarget::Ambiguous {
+                    ids: ids.iter().map(ToString::to_string).collect(),
+                },
+                Resolution::Missing => LinkTarget::Missing,
+            };
+            links.insert(key, target);
+        }
+        drop(index);
+        let children = self
+            .graph
+            .children(id)
+            .into_iter()
+            .map(|child| self.block(child, links))
+            .collect::<Result<_>>()?;
+        Ok(Block {
+            id: id.to_string(),
+            text,
+            children,
+        })
+    }
+
+    /// Blocks that link to the entity, by the entity they are in.
+    pub fn references(&self, id: &str) -> Result<Vec<Reference>> {
+        let target = self.entity_id(id)?;
+        let sources = self
+            .index()?
+            .backlinks(target)
+            .iter()
+            .map(|b| b.source)
+            .collect();
+        self.grouped(target, sources)
+    }
+
+    /// Blocks that mention the entity's name or an alias in plain text,
+    /// without linking to it.
+    pub fn unlinked_references(&self, id: &str) -> Result<Vec<Reference>> {
+        let target = self.entity_id(id)?;
+        let (names, linked) = {
+            let index = self.index()?;
+            let Some(info) = index.entity(target) else {
+                return Ok(Vec::new());
+            };
+            if matches!(info.identity(), Some(Identity::Journal(_))) {
+                return Ok(Vec::new());
+            }
+            let names: Vec<String> = std::iter::once(info.name.clone())
+                .chain(
+                    info.values("alias")
+                        .flat_map(|v| match v {
+                            Value::List(items) => items.iter().collect(),
+                            v => vec![v],
+                        })
+                        .filter_map(|v| match v {
+                            Value::Text(s) => Some(s.clone()),
+                            Value::Link(link) => Some(link.name.clone()),
+                            _ => None,
+                        }),
+                )
+                .map(|n| n.trim().to_lowercase())
+                .filter(|n| !n.is_empty())
+                .collect();
+            let linked: BTreeSet<_> = index.backlinks(target).iter().map(|b| b.source).collect();
+            (names, linked)
+        };
+        let mut found = BTreeSet::new();
+        for block in self.graph.blocks() {
+            // Entity names aren't prose, and property values are structured.
+            if self.graph.parent(block).is_none() || linked.contains(&block) {
+                continue;
+            }
+            let text = self.graph.text(block)?;
+            if is_properties_block(&text) {
+                continue;
+            }
+            let prose = without_links(&text).to_lowercase();
+            if names.iter().any(|n| contains_word(&prose, n)) {
+                found.insert(block);
+            }
+        }
+        self.grouped(target, found)
+    }
+
+    /// Groups blocks by entity, leaving out the target's own and any block
+    /// already shown inside another.
+    fn grouped(&self, target: BlockId, blocks: BTreeSet<BlockId>) -> Result<Vec<Reference>> {
+        let mut by_entity: BTreeMap<BlockId, Vec<BlockId>> = BTreeMap::new();
+        for &block in &blocks {
+            let root = self.graph.entity_of(block);
+            let entity = self.index()?.canonical(root);
+            let nested = std::iter::successors(self.graph.parent(block), |&p| self.graph.parent(p))
+                .any(|ancestor| blocks.contains(&ancestor));
+            if entity != target && block != root && !nested {
+                by_entity.entry(entity).or_default().push(block);
+            }
+        }
+        let mut groups = Vec::new();
+        for (entity, blocks) in by_entity {
+            let mut links = BTreeMap::new();
+            let blocks = blocks
+                .into_iter()
+                .map(|b| self.block(b, &mut links))
+                .collect::<Result<_>>()?;
+            let date = match self.index()?.entity(entity).and_then(|e| e.identity()) {
+                Some(Identity::Journal(date)) => Some(date),
+                _ => None,
+            };
+            let source = self.entity_ref(entity)?;
+            groups.push((
+                date,
+                Reference {
+                    source,
+                    blocks,
+                    links,
+                },
+            ));
+        }
+        // Recent days first, then everything else by name.
+        groups.sort_by_cached_key(|(date, g)| {
+            (
+                date.is_none(),
+                std::cmp::Reverse(*date),
+                g.source.title.to_lowercase(),
+                g.source.id.clone(),
+            )
+        });
+        Ok(groups.into_iter().map(|(_, g)| g).collect())
+    }
+}
+
+/// `text` with `[[links]]` and `((block refs))` blanked out, so a name inside
+/// one doesn't count as a plain mention.
+pub(crate) fn without_links(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        let skipped = ["[[", "(("].iter().find_map(|open| {
+            let close = if *open == "[[" { "]]" } else { "))" };
+            let inner = rest.strip_prefix(open)?;
+            inner.find(close).map(|end| &inner[end + 2..])
+        });
+        match skipped {
+            Some(after) => {
+                out.push(' ');
+                rest = after;
+            }
+            None => {
+                let c = rest.chars().next().expect("rest is not empty");
+                out.push(c);
+                rest = &rest[c.len_utf8()..];
+            }
+        }
+    }
+    out
+}
+
+/// Whether `name` occurs in `text` as whole words.
+pub(crate) fn contains_word(text: &str, name: &str) -> bool {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    text.match_indices(name).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + name.len()..].chars().next();
+        !before.is_some_and(word) && !after.is_some_and(word)
+    })
+}

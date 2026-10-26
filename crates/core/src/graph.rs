@@ -234,6 +234,24 @@ impl Graph {
         Ok(())
     }
 
+    /// Replaces `len` UTF-16 code units of a block's text, starting at `pos`,
+    /// with `insert`: the unit CodeMirror and JavaScript strings count in, so
+    /// an editor's changes apply as they were made rather than as a diff.
+    pub fn splice_text(&self, id: BlockId, pos: usize, len: usize, insert: &str) -> Result<()> {
+        let text = self.text_container(id)?;
+        let end = pos.saturating_add(len);
+        if end > text.len_utf16() {
+            return Err(Error::OutOfRange(id));
+        }
+        text.splice_utf16(pos, len, insert)?;
+        Ok(())
+    }
+
+    /// The length of a block's text in UTF-16 code units.
+    pub fn text_len_utf16(&self, id: BlockId) -> Result<usize> {
+        Ok(self.text_container(id)?.len_utf16())
+    }
+
     /// Creates a block under `parent` (or as a new root), at `index` among its
     /// siblings or at the end.
     pub fn create_block(
@@ -309,6 +327,25 @@ mod tests {
             assert!(matches!(graph.text(gone), Err(Error::NoSuchBlock(_))));
             assert!(graph.create_block(Some(gone), None, "x").is_err());
         }
+        Ok(())
+    }
+
+    #[test]
+    fn splicing_counts_utf16_units() -> Result<()> {
+        let graph = Graph::new();
+        let block = graph.create_block(None, None, "a😀b")?;
+        // The emoji is two UTF-16 units, so `b` starts at 3.
+        assert_eq!(graph.text_len_utf16(block)?, 4);
+        graph.splice_text(block, 3, 1, "B!")?;
+        graph.splice_text(block, 1, 2, "-")?;
+        assert_eq!(graph.text(block)?, "a-B!");
+        assert!(graph.splice_text(block, 3, 2, "").is_err(), "past the end");
+        assert!(graph.splice_text(block, 9, 0, "x").is_err());
+        assert_eq!(
+            graph.text(block)?,
+            "a-B!",
+            "a rejected splice changes nothing"
+        );
         Ok(())
     }
 

@@ -1,0 +1,17 @@
+[package]
+name = "quiddity-view"
+description = "What a Quiddity UI shows of a graph, and the edits it makes to it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+jiff.workspace = true
+quiddity-core.workspace = true
+serde = { version = "1", features = ["derive"] }
+thiserror.workspace = true
+
+[lints]
+workspace = true
