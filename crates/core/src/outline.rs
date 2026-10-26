@@ -47,7 +47,12 @@ pub struct OutlineBlock {
 
 /// The outline of an entity in the graph.
 pub fn outline_of(graph: &Graph, entity: BlockId) -> Result<Outline> {
-    let props = graph.properties_block(entity)?;
+    // The properties block goes in the file's header, which can't hold
+    // children. One that has children is written as the first bullet
+    // instead, and reads back as the same graph.
+    let props = graph
+        .properties_block(entity)?
+        .filter(|&p| graph.children(p).is_empty());
     let blocks = graph
         .children(entity)
         .into_iter()

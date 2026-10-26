@@ -63,7 +63,7 @@ impl Model {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(128))]
+    #![proptest_config(common::config(128))]
 
     #[test]
     fn graph_behaves_like_a_tree(ops in vec(op(), 1..40)) {

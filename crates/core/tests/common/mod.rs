@@ -159,3 +159,13 @@ pub fn layout(graph: &Graph) -> Vec<(BlockId, Option<BlockId>, String)> {
         })
         .collect()
 }
+
+/// Proptest settings for the slower tests: `cases` by default, or
+/// `PROPTEST_CASES` from the environment for a deeper run.
+pub fn config(cases: u32) -> proptest::test_runner::Config {
+    let cases = std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(cases);
+    proptest::test_runner::Config::with_cases(cases)
+}

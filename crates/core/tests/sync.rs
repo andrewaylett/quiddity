@@ -65,7 +65,7 @@ fn addition() -> impl Strategy<Value = Addition> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(64))]
+    #![proptest_config(common::config(64))]
 
     /// However edits and syncs interleave, once everyone has synced all
     /// replicas hold the same graph, and a snapshot reproduces it.
