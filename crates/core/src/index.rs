@@ -275,92 +275,38 @@ fn value_matches(have: &Value, want: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use quiddity_syntax::parse_block;
 
     fn text(s: &str) -> Option<Value> {
         Some(Value::Text(s.to_owned()))
     }
 
-    fn link(src: &str) -> Link {
-        parse_block(src).links.remove(0)
-    }
+    // Resolution and backlinks from prose are property-tested against an
+    // oracle in tests/index.rs.
 
     #[test]
-    fn resolves_links() -> Result<()> {
+    fn links_in_values_and_block_refs() -> Result<()> {
         let graph = Graph::new();
-        let jane_p = graph.create_entity("Jane", &[("type", text("person"))])?;
-        let jane_b = graph.create_entity(
-            "Jane",
-            &[("type", text("book")), ("alias", text("Jane (novel)"))],
+        let jane = graph.create_entity("Jane", &[])?;
+        let notes = graph.create_entity(
+            "Notes",
+            &[(
+                "about",
+                Some(Value::Link(Link {
+                    name: "Jane".into(),
+                    qualifiers: vec![],
+                })),
+            )],
         )?;
-        let summit = graph.create_entity(
-            "Summit",
-            &[("type", Some(Value::List(vec![Value::Text("event".into())])))],
-        )?;
-        let index = Index::build(&graph)?;
-
-        assert_eq!(
-            index.resolve(&link("[[jane]]")),
-            Resolution::Ambiguous(vec![jane_p, jane_b])
-        );
-        assert_eq!(
-            index.resolve(&link("[[Jane#type(person)]]")),
-            Resolution::Unique(jane_p)
-        );
-        assert_eq!(
-            index.resolve(&link("[[Jane#type([[Book]])]]")),
-            Resolution::Unique(jane_b)
-        );
-        assert_eq!(
-            index.resolve(&link("[[Jane (novel)]]")),
-            Resolution::Unique(jane_b)
-        );
-        assert_eq!(
-            index.resolve(&link("[[Jane#type(robot)]]")),
-            Resolution::Missing
-        );
-        assert_eq!(
-            index.resolve(&link("[[Summit#type(event)]]")),
-            Resolution::Unique(summit)
-        );
-        assert_eq!(
-            index.resolve(&link("[[Summit#type]]")),
-            Resolution::Unique(summit)
-        );
-        assert_eq!(index.resolve(&link("[[Nobody]]")), Resolution::Missing);
-        Ok(())
-    }
-
-    #[test]
-    fn backlinks_and_block_refs() -> Result<()> {
-        let graph = Graph::new();
-        let jane = graph.create_entity("Jane", &[("type", text("person"))])?;
-        let other = graph.create_entity("Jane", &[("type", text("book"))])?;
-        let notes = graph.create_entity("Notes", &[])?;
-        let exact = graph.create_block(Some(notes), None, "Lunch with [[Jane#type(person)]]")?;
-        let vague = graph.create_block(Some(notes), None, "#with([[Jane]])")?;
+        let props = graph.children(notes)[0];
+        let inline = graph.create_block(Some(notes), None, "#with([ [[Jane]]])")?;
         let quoted = graph.create_block(Some(notes), None, "Quotable\nid:: abc-123")?;
         let index = Index::build(&graph)?;
 
+        let sources: Vec<_> = index.backlinks(jane).iter().map(|b| b.source).collect();
         assert_eq!(
-            index.backlinks(jane),
-            [
-                Backlink {
-                    source: exact,
-                    ambiguous: false
-                },
-                Backlink {
-                    source: vague,
-                    ambiguous: true
-                }
-            ]
-        );
-        assert_eq!(
-            index.backlinks(other),
-            [Backlink {
-                source: vague,
-                ambiguous: true
-            }]
+            sources,
+            [props, inline],
+            "links in property values are backlinks"
         );
         assert_eq!(index.resolve_block_ref("abc-123"), Some(quoted));
         assert_eq!(index.resolve_block_ref("nope"), None);
