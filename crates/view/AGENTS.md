@@ -50,6 +50,10 @@ value is `None` here and `null` in JavaScript (the wasm layer sets that).
 - Edits that can't apply change nothing: `split` checks the offset is between
   characters before touching the text, and `merge_into_previous` says `None`
   rather than failing when there is nothing to merge into.
+- **Journals and property entities can't be renamed**: they are identified by
+  their date or name, so a rename would make them a different entity (and
+  `Entity::renamable` says so, for the UI). Everything else keeps its old name
+  as an alias; see `quiddity-core`.
 - Reading order is depth first; "the block before" a block is the previous one
   in that order, which for a first child is its parent.
 

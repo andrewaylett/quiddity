@@ -68,6 +68,17 @@ use, and refuses an edit that reaches past the end. `set_text` is a diff and
 is for whole-text replacement; typing should be a splice so that concurrent
 edits merge as the typists meant.
 
+## Renaming
+
+`rename_entity` keeps the old name as an `alias` property line, so links
+written against it still resolve, including ones written by a device that was
+offline. It appends to the entity's properties block, or makes one first. No
+alias is added if the old name is already one (aliases may be a list, and
+names are matched as `normalise_name` does), or if only case or spacing
+changed. It does not know which entities may be renamed: an entity identified
+by its name or date (a property entity, a journal) must not be, and that is
+the index's to say, so `quiddity-view` checks it.
+
 ## The model
 
 - **Markdown is the source of truth.** Properties, links and block refs are

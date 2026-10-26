@@ -5,7 +5,8 @@ import type { EntityId } from "@/lib/model";
 import { recordVisit } from "@/lib/recents";
 import { useRead } from "@/lib/use-graph";
 import { Region, Skeleton } from "./boundary";
-import { EntityBody, EntityTitle } from "./entity-view";
+import { EditableTitle } from "./entity-title";
+import { EntityBody } from "./entity-view";
 import { References } from "./references";
 
 function Visit({ id }: { id: EntityId }) {
@@ -36,7 +37,7 @@ export function MainEntity({ id }: { id: EntityId }) {
       >
         <Visit id={id} />
         <h1 className="mb-4 text-2xl font-semibold">
-          <EntityTitle id={id} />
+          <EditableTitle id={id} />
         </h1>
         <EntityBody id={id} />
       </Region>

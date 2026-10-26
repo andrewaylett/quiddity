@@ -6,6 +6,8 @@ pub enum Error {
     Loro(#[from] loro::LoroError),
     #[error(transparent)]
     Encode(#[from] loro::LoroEncodeError),
+    #[error("an entity needs a name")]
+    EmptyName,
     #[error("block {0} does not exist")]
     NoSuchBlock(BlockId),
     #[error("edit past the end of block {0}'s text")]
