@@ -163,8 +163,10 @@ impl Pending {
         self.lines.push((line, blank));
     }
 
+    /// The block's text, without blank lines after it. (The bullet's own
+    /// line is never flagged blank, so it always stays.)
     fn text(mut self) -> (usize, String) {
-        while self.lines.len() > 1 && self.lines.last().is_some_and(|(_, blank)| *blank) {
+        while self.lines.last().is_some_and(|(_, blank)| *blank) {
             self.lines.pop();
         }
         let lines: Vec<_> = self.lines.into_iter().map(|(l, _)| l).collect();
@@ -441,6 +443,28 @@ mod tests {
                 block("code:\n```\n- not a bullet\n```", vec![]),
                 block("next", vec![])
             ]
+        );
+        // Only a bare run of the same character, at least as long, closes.
+        for close in ["~~~", "``` x", "```"] {
+            let src = format!("- a\n  ````\n  {close}\n  - still code\n  ````\n- b\n");
+            let outline = parse_outline(&src, Indent::Auto);
+            assert_eq!(outline.blocks.len(), 2, "{src}");
+        }
+    }
+
+    #[test]
+    fn blank_lines_and_indentation() {
+        let tabs = parse_outline("- a\n\n  c\n\n\n- b\n", Indent::Tabs);
+        assert_eq!(
+            tabs.blocks,
+            vec![block("a\n\nc", vec![]), block("b", vec![])],
+            "blank lines end a block only at its end"
+        );
+        let auto = parse_outline("- a\n     deeper\n  \tb\n\n- c\n", Indent::Auto);
+        assert_eq!(
+            auto.blocks,
+            vec![block("a\n   deeper\n\tb", vec![]), block("c", vec![])],
+            "only the bullet's own indentation is removed"
         );
     }
 

@@ -48,16 +48,35 @@ proptest! {
                 Step::Write { replica, day } => {
                     let graph = &replicas[replica];
                     let journal = ensure_journal(graph, &Index::build(graph).unwrap(), dates()[day]).unwrap();
-                    let text = format!("entry {}", written[day].len());
+                    let text = format!("entry {day}.{}", written[day].len());
                     graph.create_block(Some(journal), None, &text).unwrap();
                     graph.commit();
                     written[day].push(text);
                 }
                 Step::Sync(a, b) => sync(&replicas[a], &replicas[b]).unwrap(),
                 Step::Merge(r) => {
-                    merge_duplicates(&replicas[r], &Index::build(&replicas[r]).unwrap()).unwrap();
+                    let graph = &replicas[r];
+                    let before = common::layout(graph);
+                    let moved = merge_duplicates(graph, &Index::build(graph).unwrap()).unwrap();
+                    // The node relies on this to know whether to tell peers.
+                    prop_assert_eq!(moved > 0, common::layout(graph) != before);
                 }
             }
+        }
+
+        // Before merging is finished, an export still has every write, in
+        // whichever duplicate it is.
+        let dir = tempfile::tempdir().unwrap();
+        export_dir(&replicas[0], dir.path()).unwrap();
+        let mut exported = String::new();
+        if let Ok(files) = std::fs::read_dir(dir.path().join("journals")) {
+            for file in files {
+                exported += &std::fs::read_to_string(file.unwrap().path()).unwrap();
+            }
+        }
+        let held: Vec<String> = replicas[0].blocks().into_iter().map(|b| replicas[0].text(b).unwrap()).collect();
+        for text in written.iter().flatten().filter(|t| held.contains(t)) {
+            prop_assert!(exported.contains(&format!("- {text}\n")), "{} missing from\n{}", text, exported);
         }
 
         // As the app does after every sync: merge until there's nothing left.
