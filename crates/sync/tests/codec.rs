@@ -1,0 +1,70 @@
+//! Messages and frames survive encoding, and frames survive arriving in
+//! arbitrary pieces. Decoding arbitrary bytes is fuzzed in `fuzz/`.
+
+use proptest::collection::vec;
+use proptest::prelude::*;
+use quiddity_core::Graph;
+use quiddity_sync::{FrameError, FrameReader, MAX_FRAME, Message, write_frame};
+
+/// A message with a real version: from a graph that has seen edits from
+/// several peers.
+fn message() -> impl Strategy<Value = Message> {
+    prop_oneof![
+        (proptest::option::of(any::<i64>()), vec(0..4usize, 0..6)).prop_map(|(schema, edits)| {
+            let graph = Graph::blank();
+            for peer_edits in edits {
+                let other = Graph::blank();
+                for _ in 0..peer_edits {
+                    other.create_block(None, None, "x").unwrap();
+                }
+                graph
+                    .import(&other.updates_since(&graph.version()).unwrap())
+                    .unwrap();
+            }
+            Message::Hello {
+                schema,
+                version: graph.version(),
+            }
+        }),
+        vec(any::<u8>(), 0..64).prop_map(Message::Updates),
+    ]
+}
+
+proptest! {
+    #[test]
+    fn messages_round_trip(message in message()) {
+        prop_assert_eq!(Message::decode(&message.encode()), Ok(message));
+    }
+
+    #[test]
+    fn frames_survive_any_split(payloads in vec(vec(any::<u8>(), 0..40), 0..6), cuts in vec(any::<prop::sample::Index>(), 0..8)) {
+        let mut stream = Vec::new();
+        for p in &payloads {
+            write_frame(&mut stream, p);
+        }
+        let mut cuts: Vec<usize> = cuts.iter().map(|c| c.index(stream.len() + 1)).collect();
+        cuts.push(0);
+        cuts.push(stream.len());
+        cuts.sort();
+
+        let mut reader = FrameReader::new();
+        let mut got = Vec::new();
+        for pair in cuts.windows(2) {
+            reader.push(&stream[pair[0]..pair[1]]);
+            while let Some(frame) = reader.next_frame().unwrap() {
+                got.push(frame);
+            }
+        }
+        prop_assert_eq!(got, payloads);
+    }
+}
+
+#[test]
+fn oversized_frames_are_refused_before_buffering() {
+    let mut reader = FrameReader::new();
+    reader.push(&u32::try_from(MAX_FRAME + 1).unwrap().to_le_bytes());
+    assert_eq!(
+        reader.next_frame(),
+        Err(FrameError::TooLarge(MAX_FRAME + 1))
+    );
+}

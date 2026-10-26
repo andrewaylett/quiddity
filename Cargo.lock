@@ -1188,6 +1188,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "quiddity-sync"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "quiddity-core",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "quiddity-syntax"
 version = "0.1.0"
 dependencies = [

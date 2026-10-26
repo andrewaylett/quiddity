@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 quiddity-core = { path = "../crates/core" }
+quiddity-sync = { path = "../crates/sync" }
 quiddity-syntax = { path = "../crates/syntax" }
 
 [[bin]]
@@ -22,6 +23,13 @@ bench = false
 [[bin]]
 name = "outline"
 path = "fuzz_targets/outline.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "peer"
+path = "fuzz_targets/peer.rs"
 test = false
 doc = false
 bench = false

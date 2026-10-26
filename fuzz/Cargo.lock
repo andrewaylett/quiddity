@@ -1064,7 +1064,16 @@ version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
  "quiddity-core",
+ "quiddity-sync",
  "quiddity-syntax",
+]
+
+[[package]]
+name = "quiddity-sync"
+version = "0.1.0"
+dependencies = [
+ "quiddity-core",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

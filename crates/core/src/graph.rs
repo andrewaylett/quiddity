@@ -37,6 +37,30 @@ impl FromStr for BlockId {
     }
 }
 
+/// What a replica has seen: for each peer, how many of its edits.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Version(VersionVector);
+
+impl Version {
+    pub fn encode(&self) -> Vec<u8> {
+        self.0.encode()
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        Ok(Self(VersionVector::decode(bytes)?))
+    }
+
+    /// Extends this version to include everything in `other`.
+    pub fn merge(&mut self, other: &Version) {
+        self.0.merge(&other.0);
+    }
+
+    /// Whether everything in `other` is included in this version.
+    pub fn includes(&self, other: &Version) -> bool {
+        self.0.includes_vv(&other.0)
+    }
+}
+
 /// One replica of a graph.
 #[derive(Debug)]
 pub struct Graph {
@@ -95,15 +119,22 @@ impl Graph {
         Ok(self.doc.export(ExportMode::Snapshot)?)
     }
 
-    /// An encoded version vector describing everything this replica has seen.
-    pub fn version(&self) -> Vec<u8> {
-        self.doc.oplog_vv().encode()
+    /// Everything this replica has seen.
+    pub fn version(&self) -> Version {
+        Version(self.doc.oplog_vv())
     }
 
-    /// The updates a peer at `version` (from [`Graph::version`]) is missing.
-    pub fn updates_since(&self, version: &[u8]) -> Result<Vec<u8>> {
-        let vv = VersionVector::decode(version)?;
-        Ok(self.doc.export(ExportMode::updates(&vv))?)
+    /// The updates a replica at `version` is missing.
+    pub fn updates_since(&self, version: &Version) -> Result<Vec<u8>> {
+        Ok(self.doc.export(ExportMode::updates(&version.0))?)
+    }
+
+    /// The version a replica reaches by applying `updates` (as made by
+    /// [`Graph::updates_since`]), as far as the updates themselves say.
+    pub fn version_of_updates(updates: &[u8]) -> Result<Version> {
+        Ok(Version(
+            LoroDoc::decode_import_blob_meta(updates, false)?.partial_end_vv,
+        ))
     }
 
     /// Applies updates or a snapshot from another replica.

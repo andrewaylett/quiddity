@@ -21,7 +21,7 @@ pub mod outline;
 pub mod schema;
 
 pub use error::{Error, Result};
-pub use graph::{BlockId, Graph, SCHEMA_VERSION};
+pub use graph::{BlockId, Graph, SCHEMA_VERSION, Version};
 pub use index::{Backlink, EntityInfo, Identity, Index, Resolution, canonical_value};
 pub use journal::ensure_journal;
 pub use merge::merge_duplicates;
