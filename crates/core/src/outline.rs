@@ -379,30 +379,7 @@ mod tests {
         }
     }
 
-    fn sample() -> Outline {
-        Outline {
-            title: Some("Jane: a \"person\"".into()),
-            properties: Some("type:: person\nborn:: 1970-01-01".into()),
-            blocks: vec![
-                block(
-                    "Met at [[Summit#type(event)]]\nsecond line",
-                    vec![block("child", vec![block("grandchild", vec![])])],
-                ),
-                block("", vec![]),
-                block("ends with a blank line\n", vec![]),
-                block("```\n- not a bullet\n\t- nor this\n```", vec![]),
-                block("- starts with a dash", vec![]),
-                block("  leading spaces", vec![block("\tleading tab", vec![])]),
-            ],
-        }
-    }
-
-    #[test]
-    fn round_trip() {
-        let text = format_outline(&sample());
-        assert_eq!(parse_outline(&text, Indent::Tabs), sample(), "{text}");
-    }
-
+    // Round trips are property-tested in tests/outline.rs.
     #[test]
     fn format() {
         let outline = Outline {
@@ -414,15 +391,6 @@ mod tests {
             format_outline(&outline),
             "title:: Jane\ntype:: person\n\n- a\n  b\n\t- c\n"
         );
-    }
-
-    #[test]
-    fn graph_round_trip() -> Result<()> {
-        let graph = Graph::new();
-        let id = import_outline(&graph, &sample(), "unused")?;
-        assert_eq!(graph.entity_properties(id)?.len(), 2);
-        assert_eq!(outline_of(&graph, id)?, sample());
-        Ok(())
     }
 
     #[test]

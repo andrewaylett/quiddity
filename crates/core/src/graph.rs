@@ -227,7 +227,9 @@ impl Graph {
     }
 
     /// Moves a block, with its children, under `parent` (or to the roots), at
-    /// `index` among its new siblings or at the end.
+    /// `index` among its new siblings or at the end. The index is the block's
+    /// final position, so when moving within the same parent it counts the
+    /// siblings other than the block itself.
     pub fn move_block(
         &self,
         id: BlockId,
@@ -260,67 +262,27 @@ fn parent_id(parent: Option<BlockId>) -> TreeParentId {
 mod tests {
     use super::*;
 
-    #[test]
-    fn create_and_read_blocks() -> Result<()> {
-        let graph = Graph::new();
-        assert_eq!(graph.schema_version(), Some(SCHEMA_VERSION));
-        let page = graph.create_block(None, None, "Page")?;
-        let a = graph.create_block(Some(page), None, "a")?;
-        let c = graph.create_block(Some(page), None, "c")?;
-        let b = graph.create_block(Some(page), Some(1), "b")?;
-        let a1 = graph.create_block(Some(a), None, "a1")?;
-        assert_eq!(graph.roots(), vec![page]);
-        assert_eq!(graph.children(page), vec![a, b, c]);
-        assert_eq!(graph.blocks(), vec![page, a, a1, b, c]);
-        assert_eq!(graph.parent(a1), Some(a));
-        assert_eq!(graph.entity_of(a1), page);
-        assert_eq!(graph.text(b)?, "b");
-        Ok(())
-    }
+    // Tree operations are checked against a model in tests/graph_model.rs,
+    // and snapshots and updates in tests/sync.rs.
 
     #[test]
-    fn move_and_delete() -> Result<()> {
+    fn deleted_blocks_are_gone() -> Result<()> {
         let graph = Graph::new();
         let page = graph.create_block(None, None, "Page")?;
-        let a = graph.create_block(Some(page), None, "a")?;
-        let b = graph.create_block(Some(page), None, "b")?;
-        graph.move_block(b, Some(page), Some(0))?;
-        assert_eq!(graph.children(page), vec![b, a]);
-        graph.move_block(b, Some(a), None)?;
-        assert_eq!(graph.children(a), vec![b]);
-        assert!(
-            graph.move_block(a, Some(b), None).is_err(),
-            "cycles are refused"
-        );
-        graph.delete_block(a)?;
-        assert!(!graph.contains(a) && !graph.contains(b));
-        assert_eq!(graph.blocks(), vec![page]);
-        assert!(matches!(graph.text(a), Err(Error::NoSuchBlock(_))));
+        let child = graph.create_block(Some(page), None, "child")?;
+        let grandchild = graph.create_block(Some(child), None, "grandchild")?;
+        assert_eq!(graph.entity_of(grandchild), page);
+        graph.delete_block(child)?;
+        for gone in [child, grandchild] {
+            assert!(!graph.contains(gone));
+            assert!(matches!(graph.text(gone), Err(Error::NoSuchBlock(_))));
+            assert!(graph.create_block(Some(gone), None, "x").is_err());
+        }
         Ok(())
     }
 
     #[test]
-    fn text_edits() -> Result<()> {
-        let graph = Graph::new();
-        let block = graph.create_block(None, None, "hello world")?;
-        graph.set_text(block, "hello there, world")?;
-        assert_eq!(graph.text(block)?, "hello there, world");
-        Ok(())
-    }
-
-    #[test]
-    fn snapshot_round_trip() -> Result<()> {
-        let graph = Graph::new();
-        let page = graph.create_block(None, None, "Page")?;
-        graph.create_block(Some(page), None, "child")?;
-        let copy = Graph::from_snapshot(&graph.snapshot()?)?;
-        assert_eq!(copy.schema_version(), Some(SCHEMA_VERSION));
-        assert_eq!(copy.blocks(), graph.blocks());
-        Ok(())
-    }
-
-    #[test]
-    fn block_id_round_trip() -> Result<()> {
+    fn block_ids_round_trip_as_text() -> Result<()> {
         let graph = Graph::new();
         let block = graph.create_block(None, None, "x")?;
         assert_eq!(block.to_string().parse::<BlockId>()?, block);
