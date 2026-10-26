@@ -1,0 +1,7 @@
+# Dev tooling for working on quiddity itself.
+[tools]
+rust = { version = "1.99.1", profile = "default" }
+node = "22"
+pnpm = "10.28.0"
+jj = "0.46.0"
+pinact = "5.0.2"
