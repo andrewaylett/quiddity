@@ -81,7 +81,7 @@ export function References({ id }: { id: EntityId }) {
   return (
     <footer className="mt-10 space-y-6 border-t border-slate-200 pt-6 dark:border-slate-700">
       <Region
-        key={id}
+        key={`linked:${id}`}
         pending={<Skeleton className="h-4 w-1/3" />}
         failed={(error) => (
           <p role="alert" className="text-sm text-red-700 dark:text-red-300">
@@ -91,7 +91,7 @@ export function References({ id }: { id: EntityId }) {
       >
         <Linked id={id} />
       </Region>
-      <Unlinked key={id} id={id} />
+      <Unlinked key={`unlinked:${id}`} id={id} />
     </footer>
   );
 }

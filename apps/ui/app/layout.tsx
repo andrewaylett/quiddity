@@ -15,9 +15,13 @@ import { UndoKeys } from "@/components/undo-keys";
 export const metadata: Metadata = { title: "Quiddity" };
 
 /**
- * Both sidebars read the URL, which in a static export suspends up to the
- * nearest boundary. Each pane therefore has its own, so none can hold up
- * another; the right pane's fallback is empty so it reserves no space.
+ * Both sidebars read the URL, which suspends up to the nearest boundary, so
+ * each pane has its own, and none can hold up another; the right pane's
+ * fallback is empty so it reserves no space.
+ *
+ * They also read the graph, which only exists in the browser, so they render
+ * only there (`ClientOnly`). A static export never renders them on a server
+ * anyway, but `next dev` does, on every request.
  */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -30,14 +34,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </ClientOnly>
         <Shell
           left={
-            <Suspense fallback={<Skeleton className="m-4 h-4 w-3/4" />}>
-              <LeftSidebar />
-            </Suspense>
+            <ClientOnly fallback={<Skeleton className="m-4 h-4 w-3/4" />}>
+              <Suspense fallback={<Skeleton className="m-4 h-4 w-3/4" />}>
+                <LeftSidebar />
+              </Suspense>
+            </ClientOnly>
           }
           right={
-            <Suspense fallback={null}>
-              <RightPane />
-            </Suspense>
+            <ClientOnly>
+              <Suspense fallback={null}>
+                <RightPane />
+              </Suspense>
+            </ClientOnly>
           }
         >
           {/* The graph only exists in the browser, so the page isn't prerendered. */}
