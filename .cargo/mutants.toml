@@ -1,6 +1,9 @@
 # cargo mutants: https://mutants.rs/
 test_tool = "nextest"
 additional_cargo_test_args = ["--profile", "mutants"]
+# Build trees are copies of the source: leave out ignored files, such as the
+# fuzz crate's own target directory, which would fill the disk.
+gitignore = true
 
 # The WASM glue returns JavaScript values, so it only runs in a browser. What
 # it wraps (quiddity-view) is tested and mutation-tested natively.
