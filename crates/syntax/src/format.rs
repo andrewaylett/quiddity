@@ -185,4 +185,21 @@ mod tests {
             "[[C# notes]]"
         );
     }
+
+    /// Text that reads back alone can still pair with brackets after it:
+    /// `#p(a [[b] c]) see x]]` would read as a link reaching past the `)`.
+    #[test]
+    fn values_stop_at_their_end() {
+        for (value, after) in [("a [[b] c]", "x]]"), ("a ((b) c)", "x))")] {
+            for written in [
+                format_inline_property("p", Some(&text(value))),
+                format_inline_property("p", Some(&Value::List(vec![text(value)]))),
+            ] {
+                let src = format!("{written} {after}");
+                let block = crate::parse_block(&src);
+                assert_eq!(block.properties.len(), 1, "{src}");
+                assert_eq!(block.properties[0].span, 0..written.len(), "{src}");
+            }
+        }
+    }
 }
