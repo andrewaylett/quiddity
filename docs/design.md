@@ -382,6 +382,19 @@ tree) is a single Loro transaction, so it syncs and undoes as one unit. Because
 it's one document, there are no non-atomic edits across documents to worry
 about.
 
+In the UI, undo is the graph's rather than an editor's: Ctrl/Cmd-Z and
+Ctrl/Cmd-Shift-Z (or Ctrl-Y) work whichever block has the focus, or none, and
+undo structure as well as text. Each structural edit is one step. Typing is
+one step until it pauses for about a second, so a sentence undoes together; a
+structural edit ends any burst of typing first. What the app does itself, such
+as creating today's journal at startup, is not on the stack.
+
+Loro brings a deleted block back, text and all, but **as a new block**: an id
+held across an undo of its deletion (or a redo of its creation) is dead, and
+edits another device made concurrently to the old block are not carried over to
+the new one. Nothing may therefore treat a block id as stable across an undo.
+(Entity ids in URLs are not affected unless the entity's creation is undone.)
+
 ## Versioning and migration
 
 - The document carries a `schemaVersion`.
@@ -474,8 +487,7 @@ born:: 1970-01-01
   newline, Tab and Shift-Tab indent and outdent, Backspace at the start joins
   the block to the one before, Alt-Up and Alt-Down move it among its siblings,
   the arrows move between blocks at the edges, and Escape leaves the editor.
-  Undo is the editor's own, per block while it is open; document-wide undo
-  (see [Undo](#undo)) is not wired up yet.
+  Undo is document-wide (see [Undo](#undo)).
 - **Views stay in step.** The same block can be open in the main pane and a
   secondary. Changes from elsewhere reach an open editor as the smallest edit
   that turns its text into the graph's. Typing notifies other views after a

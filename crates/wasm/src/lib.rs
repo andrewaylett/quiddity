@@ -35,15 +35,16 @@ impl Replica {
     pub fn new(snapshot: &[u8]) -> Result<Replica, JsError> {
         console_error_panic_hook::set_once();
         let view = View::new(Graph::from_snapshot(snapshot).map_err(Error::from)?)?;
+        view.graph().enable_undo();
         Ok(Self { view })
     }
 
     /// A replica of a new, empty graph. For development outside the app.
     pub fn empty() -> Result<Replica, JsError> {
         console_error_panic_hook::set_once();
-        Ok(Self {
-            view: View::new(Graph::new())?,
-        })
+        let view = View::new(Graph::new())?;
+        view.graph().enable_undo();
+        Ok(Self { view })
     }
 
     /// The whole graph, to start another replica from.
@@ -108,6 +109,29 @@ impl Replica {
     #[wasm_bindgen(js_name = unlinkedReferences)]
     pub fn unlinked_references(&self, id: &str) -> Result<JsValue, JsError> {
         js(&self.view.unlinked_references(id)?)
+    }
+
+    /// Ends a burst of typing, so the next typing is a new undo step. Call
+    /// when typing pauses.
+    #[wasm_bindgen(js_name = endTyping)]
+    pub fn end_typing(&self) {
+        self.view.end_typing();
+    }
+
+    /// Undoes this replica's latest step. False if there is none.
+    pub fn undo(&self) -> Result<bool, JsError> {
+        Ok(self.view.undo()?)
+    }
+
+    pub fn redo(&self) -> Result<bool, JsError> {
+        Ok(self.view.redo()?)
+    }
+
+    /// Forgets what could be undone: for edits that aren't the user's, such
+    /// as creating today's journal when the app starts.
+    #[wasm_bindgen(js_name = clearUndo)]
+    pub fn clear_undo(&self) {
+        self.view.graph().clear_undo();
     }
 
     /// A block's current text.
@@ -179,6 +203,25 @@ mod tests {
 
     /// What the UI does with it, minus JavaScript: load a snapshot, edit,
     /// send the updates on.
+    #[test]
+    fn the_replica_undoes_its_own_edits_only() {
+        let shell = Graph::new();
+        let page = shell.create_entity("Page", &[]).unwrap();
+        let block = shell.create_block(Some(page), None, "hi").unwrap();
+        let replica = Replica::new(&shell.snapshot().unwrap()).unwrap();
+        let id = block.to_string();
+
+        assert!(!replica.undo().unwrap(), "nothing of its own yet");
+        replica.splice_text(&id, 2, 0, "!").unwrap();
+        replica.end_typing();
+        assert!(replica.undo().unwrap());
+        assert_eq!(replica.block_text(&id).unwrap(), "hi");
+        assert!(replica.redo().unwrap());
+        replica.clear_undo();
+        assert!(!replica.undo().unwrap(), "cleared");
+        assert_eq!(replica.block_text(&id).unwrap(), "hi!");
+    }
+
     #[test]
     fn updates_carry_edits_between_replicas() {
         let shell = Graph::new();

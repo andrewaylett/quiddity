@@ -37,6 +37,8 @@ pub struct View {
     graph: Graph,
     index: RefCell<Index>,
     stale: Cell<bool>,
+    /// Whether a burst of typing is open, as one undo step.
+    typing: Cell<bool>,
 }
 
 impl View {
@@ -46,6 +48,7 @@ impl View {
             graph,
             index: RefCell::new(index),
             stale: Cell::new(false),
+            typing: Cell::new(false),
         })
     }
 

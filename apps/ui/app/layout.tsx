@@ -10,6 +10,7 @@ import { ClientOnly } from "@/components/client-only";
 import { LeftSidebar } from "@/components/left-sidebar";
 import { RightPane } from "@/components/right-pane";
 import { Shell } from "@/components/shell";
+import { UndoKeys } from "@/components/undo-keys";
 
 export const metadata: Metadata = { title: "Quiddity" };
 
@@ -22,6 +23,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en-GB">
       <body>
+        <ClientOnly>
+          <Suspense fallback={null}>
+            <UndoKeys />
+          </Suspense>
+        </ClientOnly>
         <Shell
           left={
             <Suspense fallback={<Skeleton className="m-4 h-4 w-3/4" />}>

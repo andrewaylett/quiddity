@@ -7,8 +7,7 @@ outline text format.
 
 - **Export commits pending edits.** `updates_since` and `snapshot` include
   uncommitted edits, so `Graph::commit` only marks a transaction boundary.
-  Nothing observes that until undo exists, which is why its no-op mutant is
-  excluded.
+  With undo enabled that boundary matters: each commit is one undo step.
 - **`version()` counts uncommitted edits too.**
 - **Imports wait for their causes.** Updates whose earlier changes a replica
   hasn't seen are held pending without error. Exporting from a version the
@@ -41,6 +40,33 @@ every device is in the list: the one that creates a graph records itself,
 and a device vouches for each newcomer it hands the graph to
 (`vouch_for`). A blank replica must not edit (or vouch) before it joins: an
 edit with nothing beneath it can't be applied by a compacted replica.
+
+## Undo
+
+- **Opt-in.** `enable_undo` binds Loro's `UndoManager` to this replica; the
+  shell and the headless node never call it, so they pay nothing. It only ever
+  undoes this replica's own edits made after it was enabled, never another
+  peer's. `undo`, `redo`, `clear_undo` and the group calls do nothing, and say
+  so, until then.
+- **One commit is one step.** A multi-block edit done in one commit (a split
+  is a splice and a create) undoes as one unit. `begin_undo_group` and
+  `end_undo_group` make the commits between them a single step, which is how a
+  burst of typing is one step; `quiddity-view` decides where bursts begin and
+  end.
+- **Loro restores a deleted block as a new block.** Undoing a deletion, or
+  redoing a creation, brings back the text and position under a new ID, and
+  edits another device made concurrently to the old block are not carried
+  over. An ID held across an undo is dead; tests compare text, not IDs, for
+  this reason.
+- `undo` and `redo` commit first, so edits made but not yet committed are a
+  step of their own rather than lost.
+
+## Text
+
+`splice_text` counts UTF-16 code units, the unit JavaScript and CodeMirror
+use, and refuses an edit that reaches past the end. `set_text` is a diff and
+is for whole-text replacement; typing should be a splice so that concurrent
+edits merge as the typists meant.
 
 ## The model
 
