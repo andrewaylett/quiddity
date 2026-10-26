@@ -18,6 +18,23 @@ outline text format.
 - `Graph::blank()` has no schema version until it syncs; `Graph::new()`
   writes one.
 
+## Compaction
+
+`Graph::shallow_snapshot(at)` keeps history only from `at` on. Loading it
+gives a replica that:
+
+- **can't update a peer behind `at`.** Loro would export updates that never
+  apply, so `updates_since` refuses with `Error::BeforeHistory` instead;
+  check `can_update` first. A blank peer can start from the snapshot.
+- **can't apply edits made on the history it dropped.** Loro refuses them
+  on import, also `Error::BeforeHistory`. So compacting at what every
+  replica has is only safe once this replica has everything any replica
+  has: an edit made on older history is then already here.
+- **A Loro document that has imported anything ignores a compacted
+  snapshot**, silently. So `from_snapshot` of a blank graph imports nothing,
+  and `import` checks that what it imported shows in the version
+  (`Error::NotApplied` if not), so nothing goes missing without a word.
+
 ## The model
 
 - **Markdown is the source of truth.** Properties, links and block refs are

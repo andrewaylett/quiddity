@@ -16,6 +16,10 @@ enum Step {
     Sync(usize, usize),
     /// The device restarts, reloading from its own snapshot.
     Restart(usize),
+    /// The device catches up with everyone, then drops the history they all
+    /// have. Having everything any replica has, nothing can arrive later
+    /// that was made on the history it drops.
+    Compact(usize),
 }
 
 fn step() -> impl Strategy<Value = Step> {
@@ -23,6 +27,7 @@ fn step() -> impl Strategy<Value = Step> {
         6 => (0..REPLICAS, op()).prop_map(|(r, op)| Step::Edit(r, op)),
         2 => (0..REPLICAS, 0..REPLICAS).prop_map(|(a, b)| Step::Sync(a, b)),
         1 => (0..REPLICAS).prop_map(Step::Restart),
+        2 => (0..REPLICAS).prop_map(Step::Compact),
     ]
 }
 
@@ -83,6 +88,103 @@ fn send(from: &Graph, to: &Graph) -> Result<(), TestCaseError> {
     Ok(())
 }
 
+/// A replica compacted past what another has seen can't update it, and
+/// says so, rather than sending updates that would never apply. A blank
+/// replica can still start from its snapshot.
+#[test]
+fn compaction_leaves_behind_only_those_it_must() {
+    let (a, behind) = (Graph::new(), Graph::blank());
+    sync(&a, &behind).unwrap();
+    for i in 0..3 {
+        a.create_block(None, None, &i.to_string()).unwrap();
+        a.commit();
+    }
+    let compacted = Graph::from_snapshot(&a.shallow_snapshot(&a.version()).unwrap()).unwrap();
+    assert!(!compacted.can_update(&behind.version()));
+    assert!(matches!(
+        compacted.updates_since(&behind.version()),
+        Err(quiddity_core::Error::BeforeHistory)
+    ));
+    assert!(!compacted.can_update(&Graph::blank().version()));
+    let joined = Graph::from_snapshot(&compacted.snapshot().unwrap()).unwrap();
+    assert_eq!(layout(&joined), layout(&a));
+    // And from then on it syncs as usual.
+    joined.create_block(None, None, "later").unwrap();
+    sync(&joined, &a).unwrap();
+    assert_eq!(layout(&joined), layout(&a));
+}
+
+/// Compacting where there's nothing more to drop changes nothing, even
+/// right at the start of a graph's history.
+#[test]
+fn compacting_again_drops_nothing_more() {
+    let graph = Graph::new();
+    let compacted =
+        Graph::from_snapshot(&graph.shallow_snapshot(&graph.version()).unwrap()).unwrap();
+    for at in [Version::default(), compacted.version()] {
+        let again = Graph::from_snapshot(&compacted.shallow_snapshot(&at).unwrap()).unwrap();
+        assert_eq!(again.history_start(), compacted.history_start());
+        assert_eq!(again.schema_version(), Some(SCHEMA_VERSION));
+    }
+}
+
+/// The point of compacting: a much-edited block's history goes.
+#[test]
+fn compaction_drops_history() {
+    let graph = Graph::new();
+    let block = graph.create_block(None, None, "").unwrap();
+    for i in 0..300 {
+        graph
+            .set_text(block, &format!("draft {i} ").repeat(10))
+            .unwrap();
+        graph.commit();
+    }
+    let full = graph.snapshot().unwrap().len();
+    let shallow = graph.shallow_snapshot(&graph.version()).unwrap().len();
+    assert!(shallow * 4 < full, "{shallow} of {full} bytes");
+}
+
+/// A blank replica saved and loaded again can still start from a compacted
+/// replica's snapshot, and nothing is ever silently left unapplied.
+#[test]
+fn imports_apply_or_say_why_not() {
+    let a = Graph::new();
+    let before = a.version();
+    a.create_block(None, None, "hello").unwrap();
+    a.commit();
+    let compacted = a.shallow_snapshot(&a.version()).unwrap();
+
+    let reloaded = Graph::from_snapshot(&Graph::blank().snapshot().unwrap()).unwrap();
+    reloaded.import(&compacted).unwrap();
+    assert_eq!(layout(&reloaded), layout(&a));
+
+    // Updates made on history the blank replica hasn't seen.
+    let updates = a.updates_since(&before).unwrap();
+    assert!(matches!(
+        Graph::blank().import(&updates),
+        Err(quiddity_core::Error::NotApplied)
+    ));
+}
+
+/// Edits made on history a replica has dropped can't be applied, and that
+/// is reported as such: the replica needs that history back first.
+#[test]
+fn edits_on_dropped_history_are_refused() {
+    let (a, y) = (Graph::new(), Graph::blank());
+    sync(&a, &y).unwrap();
+    // y writes without having seen a's next edit.
+    y.create_block(None, None, "from y").unwrap();
+    y.commit();
+    a.create_block(None, None, "from a").unwrap();
+    a.commit();
+    let compacted = Graph::from_snapshot(&a.shallow_snapshot(&a.version()).unwrap()).unwrap();
+    let updates = y.updates_since(&a.version().meet(&y.version())).unwrap();
+    assert!(matches!(
+        compacted.import(&updates),
+        Err(quiddity_core::Error::BeforeHistory)
+    ));
+}
+
 #[test]
 fn a_blank_replica_learns_the_schema_by_syncing() {
     let (origin, blank) = (Graph::new(), Graph::blank());
@@ -108,6 +210,18 @@ proptest! {
                 }
                 Step::Restart(r) => {
                     replicas[r] = Graph::from_snapshot(&replicas[r].snapshot().unwrap()).unwrap();
+                }
+                Step::Compact(r) => {
+                    for o in 0..REPLICAS {
+                        send(&replicas[o], &replicas[r])?;
+                    }
+                    let shared = replicas.iter().map(Graph::version).reduce(|a, b| a.meet(&b)).unwrap();
+                    let before = layout(&replicas[r]);
+                    replicas[r] = Graph::from_snapshot(&replicas[r].shallow_snapshot(&shared).unwrap()).unwrap();
+                    prop_assert_eq!(layout(&replicas[r]), before);
+                    for other in &replicas {
+                        prop_assert!(replicas[r].can_update(&other.version()));
+                    }
                 }
             }
         }

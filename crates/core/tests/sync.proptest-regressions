@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc c3375a820f074ffb7ed0de56d0ccd71a5e25994612cf47ba0fd11b63fd6b97f4 # shrinks to steps = [Create { replica: 2, parent: None }, Sync(0, 2), Append { replica: 0, block: Index(0) }, Append { replica: 2, block: Index(0) }]
+cc 8a624b2ad91bffbb2c87ea3979a595331db5959cf07d213fc3f4f032fd61e4f3 # shrinks to steps = [Edit(2, Create { parent: None, at: Index(0), text: "" }), Sync(2, 0), Compact(1)]

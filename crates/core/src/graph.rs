@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
@@ -59,6 +60,11 @@ impl Version {
     pub fn includes(&self, other: &Version) -> bool {
         self.0.includes_vv(&other.0)
     }
+
+    /// What both versions include.
+    pub fn meet(&self, other: &Version) -> Version {
+        Version(self.0.intersection(&other.0))
+    }
 }
 
 /// One replica of a graph.
@@ -97,7 +103,11 @@ impl Graph {
     /// Loads a replica from a snapshot.
     pub fn from_snapshot(bytes: &[u8]) -> Result<Self> {
         let graph = Self::blank();
-        graph.doc.import(bytes)?;
+        // A blank replica stays truly blank: a Loro document that has
+        // imported anything, even nothing, ignores a compacted snapshot.
+        if Self::version_of_updates(bytes)? != Version::default() {
+            graph.import(bytes)?;
+        }
         Ok(graph)
     }
 
@@ -119,9 +129,48 @@ impl Graph {
         Version(self.doc.oplog_vv())
     }
 
-    /// The updates a replica at `version` is missing.
+    /// The updates a replica at `version` is missing. A replica whose version
+    /// predates this one's history can't be brought up to date with updates
+    /// (they would never apply), so that is an error.
     pub fn updates_since(&self, version: &Version) -> Result<Vec<u8>> {
+        if !self.can_update(version) {
+            return Err(Error::BeforeHistory);
+        }
         Ok(self.doc.export(ExportMode::updates(&version.0))?)
+    }
+
+    /// The version this replica's history starts at: empty if it has all of
+    /// it, or where it was compacted by [`Graph::shallow_snapshot`].
+    pub fn history_start(&self) -> Version {
+        Version(self.doc.shallow_since_vv().to_vv())
+    }
+
+    /// Whether [`Graph::updates_since`] can bring a replica at `version` up
+    /// to date.
+    pub fn can_update(&self, version: &Version) -> bool {
+        version.includes(&self.history_start())
+    }
+
+    /// A snapshot that keeps history only from `at` on (or from as close to
+    /// it as this replica can). Loading it gives a replica that can only
+    /// update peers that have reached `at`, and can only apply edits made on
+    /// top of `at`.
+    ///
+    /// So it is safe to compact at a version every replica has reached once
+    /// this replica has everything any replica has: whatever arrives later
+    /// was made on top of `at`.
+    pub fn shallow_snapshot(&self, at: &Version) -> Result<Vec<u8>> {
+        let start = self.history_start();
+        let mut at = at.meet(&self.version());
+        at.merge(&start);
+        if at == start {
+            // Nothing more to drop.
+            return self.snapshot();
+        }
+        let frontiers = self.doc.vv_to_frontiers(&at.0);
+        Ok(self
+            .doc
+            .export(ExportMode::ShallowSnapshot(Cow::Owned(frontiers)))?)
     }
 
     /// The version a replica reaches by applying `updates` (as made by
@@ -133,8 +182,22 @@ impl Graph {
     }
 
     /// Applies updates or a snapshot from another replica.
+    ///
+    /// A compacted replica can't apply edits made on history it has dropped:
+    /// that is [`Error::BeforeHistory`]. Anything else that can't be applied
+    /// here (updates whose causes this replica hasn't seen, which Loro would
+    /// hold back without saying) is [`Error::NotApplied`].
     pub fn import(&self, bytes: &[u8]) -> Result<()> {
-        self.doc.import(bytes)?;
+        match self.doc.import(bytes) {
+            Ok(_) => {}
+            Err(loro::LoroError::ImportUpdatesThatDependsOnOutdatedVersion) => {
+                return Err(Error::BeforeHistory);
+            }
+            Err(e) => return Err(e.into()),
+        }
+        if !self.version().includes(&Self::version_of_updates(bytes)?) {
+            return Err(Error::NotApplied);
+        }
         Ok(())
     }
 

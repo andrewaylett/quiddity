@@ -16,6 +16,10 @@ pub enum Error {
     TextUpdate(#[from] loro::UpdateTimeoutError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("that predates this replica's history, which has been compacted")]
+    BeforeHistory,
+    #[error("those updates can't be applied here: this replica lacks what they were made on")]
+    NotApplied,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
