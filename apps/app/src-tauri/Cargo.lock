@@ -4425,7 +4425,6 @@ dependencies = [
 name = "quiddity-app"
 version = "0.1.0"
 dependencies = [
- "jiff",
  "quiddity-core",
  "quiddity-node",
  "serde",

@@ -1,57 +1,39 @@
-//! The Tauri shell: opens the graph and answers the UI's queries.
+//! The Tauri shell: opens the graph, hands it to the UI, and keeps the UI's
+//! edits safe.
 //!
-//! The UI reads through `apps/ui/lib/tauri-store.ts`, which calls the
-//! commands here. They are read-only for now (today's journal aside); editing
-//! arrives with the UI's own replica.
+//! The UI holds its own replica of the graph (the core compiled to WASM), so
+//! typing never waits on IPC. These commands carry the graph in as a snapshot
+//! and the edits back as updates, both as raw bytes.
 
 mod session;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use session::{Entity, EntityRef, Error, Reference, Session};
+use session::{Error, Session};
+use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{Manager, State};
 
 type Shared<'a> = State<'a, Mutex<Session>>;
 
+/// The whole graph, for the UI to start from.
+///
 /// Commands are `async` so they run off the main thread. The lock is never
 /// held across an await point, so a poisoned lock is the only way to fail
 /// here, and that is a bug worth crashing for.
-fn with<T>(
-    state: Shared<'_>,
-    f: impl FnOnce(&mut Session) -> Result<T, Error>,
-) -> Result<T, Error> {
-    f(&mut state.lock().expect("session lock poisoned"))
+#[tauri::command]
+async fn load_graph(state: Shared<'_>) -> Result<Response, Error> {
+    let session = state.lock().expect("session lock poisoned");
+    Ok(Response::new(session.snapshot()?))
 }
 
+/// Updates from the UI's edits, as the request body.
 #[tauri::command]
-async fn favourites(state: Shared<'_>) -> Result<Vec<EntityRef>, Error> {
-    with(state, |s| s.favourites())
-}
-
-#[tauri::command]
-async fn entities(state: Shared<'_>) -> Result<Vec<EntityRef>, Error> {
-    with(state, |s| s.entities())
-}
-
-#[tauri::command]
-async fn journals(state: Shared<'_>) -> Result<Vec<EntityRef>, Error> {
-    with(state, |s| s.journals())
-}
-
-#[tauri::command]
-async fn references(state: Shared<'_>, id: String) -> Result<Vec<Reference>, Error> {
-    with(state, |s| s.references(&id))
-}
-
-#[tauri::command]
-async fn unlinked_references(state: Shared<'_>, id: String) -> Result<Vec<Reference>, Error> {
-    with(state, |s| s.unlinked_references(&id))
-}
-
-#[tauri::command]
-async fn entity(state: Shared<'_>, id: String) -> Result<Entity, Error> {
-    with(state, |s| s.entity(&id))
+async fn push_updates(state: Shared<'_>, request: Request<'_>) -> Result<(), Error> {
+    let InvokeBody::Raw(updates) = request.body() else {
+        return Err(Error::NotBytes);
+    };
+    state.lock().expect("session lock poisoned").apply(updates)
 }
 
 /// `QUIDDITY_GRAPH` names the graph's directory, for working on a graph made
@@ -71,14 +53,7 @@ pub fn run() {
             app.manage(Mutex::new(Session::open(&graph_dir(app)?)?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            favourites,
-            entities,
-            journals,
-            entity,
-            references,
-            unlinked_references
-        ])
+        .invoke_handler(tauri::generate_handler![load_graph, push_updates])
         .run(tauri::generate_context!())
         .expect("error while running the Quiddity app");
 }

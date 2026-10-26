@@ -2,10 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { use } from "react";
 import type { EntityRef } from "@/lib/model";
 import { useRecents } from "@/lib/recents";
-import { store } from "@/lib/store";
+import { useRead } from "@/lib/use-graph";
 import { Region, Skeleton } from "./boundary";
 import { EntityLink } from "./entity-link";
 import { useView } from "./use-view";
@@ -52,7 +51,7 @@ const listSkeleton = (
 );
 
 function Favourites() {
-  return <Items items={use(store.favourites())} />;
+  return <Items items={useRead((g) => g.favourites())} />;
 }
 
 /** Fixed places in the app, as opposed to entities in the graph. */

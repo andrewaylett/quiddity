@@ -1,8 +1,8 @@
 "use client";
 
-import { use, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EntityRef } from "@/lib/model";
-import { store } from "@/lib/store";
+import { useRead } from "@/lib/use-graph";
 import { Region, Skeleton } from "./boundary";
 import { EntityLink } from "./entity-link";
 import { EntityBody } from "./entity-view";
@@ -34,7 +34,7 @@ function Day({ day }: { day: EntityRef }) {
 }
 
 function Days() {
-  const days = use(store.journals());
+  const days = useRead((g) => g.journals());
   const [shown, setShown] = useState(PAGE);
   const more = useRef<HTMLDivElement>(null);
   const hasMore = shown < days.length;

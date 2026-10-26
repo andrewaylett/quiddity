@@ -1,8 +1,11 @@
 "use client";
 
-import { Fragment, use, type ReactNode } from "react";
+import { Fragment, useContext, type ReactNode } from "react";
 import type { Block, EntityId, LinkTarget } from "@/lib/model";
-import { store } from "@/lib/store";
+import { useRead } from "@/lib/use-graph";
+import { BlockEditor } from "./block-editor";
+import { EditableOutline } from "./editing";
+import { EditingContext } from "./editing-context";
 import { EntityLink } from "./entity-link";
 
 const unresolved = "cursor-help underline decoration-dashed underline-offset-2";
@@ -41,34 +44,71 @@ function Inline({ text, links }: { text: string; links: Record<string, LinkTarge
   return parts.map((p, i) => <Fragment key={i}>{p}</Fragment>);
 }
 
-export function Outline({ blocks, links }: { blocks: Block[]; links: Record<string, LinkTarget> }) {
+/** One block: its text, rendered or being edited, then its children. */
+function BlockRow({ block, links }: { block: Block; links: Record<string, LinkTarget> }) {
+  const editing = useContext(EditingContext);
+  const current = editing?.current;
+  const isEditing = current?.id === block.id;
+  return (
+    <li className="flex gap-2">
+      <span aria-hidden className="mt-2.5 size-1.5 shrink-0 rounded-full bg-slate-400" />
+      <div className="min-w-0 flex-1 py-0.5">
+        {isEditing ? (
+          <BlockEditor id={block.id} caret={current.caret} />
+        ) : (
+          <p
+            className={`min-h-[1.5em] whitespace-pre-line break-words ${
+              editing ? "cursor-text" : ""
+            }`}
+            tabIndex={editing ? 0 : undefined}
+            onClick={(e) => {
+              if (editing && !(e.target as HTMLElement).closest("a")) {
+                editing.edit(block.id, "end");
+              }
+            }}
+            onKeyDown={(e) => {
+              if (editing && e.target === e.currentTarget && e.key === "Enter") {
+                e.preventDefault();
+                editing.edit(block.id, "end");
+              }
+            }}
+          >
+            <Inline text={block.text} links={links} />
+          </p>
+        )}
+        {block.children.length > 0 && (
+          <div className="mt-1">
+            <Outline blocks={block.children} links={links} />
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** Blocks as an outline. Editable if inside an `EditableOutline`. */
+export function Outline({
+  blocks,
+  links,
+}: {
+  blocks: Block[];
+  links: Record<string, LinkTarget>;
+}) {
   return (
     <ul className="space-y-1">
       {blocks.map((block) => (
-        <li key={block.id} className="flex gap-2">
-          <span aria-hidden className="mt-2.5 size-1.5 shrink-0 rounded-full bg-slate-400" />
-          <div className="min-w-0 flex-1 py-0.5">
-            <p className="whitespace-pre-line break-words">
-              <Inline text={block.text} links={links} />
-            </p>
-            {block.children.length > 0 && (
-              <div className="mt-1">
-                <Outline blocks={block.children} links={links} />
-              </div>
-            )}
-          </div>
-        </li>
+        <BlockRow key={block.id} block={block} links={links} />
       ))}
     </ul>
   );
 }
 
-/** Suspends until the entity loads; throws to the nearest error boundary. */
+/** An entity's blocks, editable in place. Throws if there is no such entity. */
 export function EntityBody({ id }: { id: EntityId }) {
-  const entity = use(store.entity(id));
-  return <Outline blocks={entity.blocks} links={entity.links} />;
+  const entity = useRead((g) => g.entity(id));
+  return <EditableOutline entityId={id} blocks={entity.blocks} links={entity.links} />;
 }
 
 export function EntityTitle({ id }: { id: EntityId }) {
-  return <>{use(store.entity(id)).title}</>;
+  return <>{useRead((g) => g.entity(id)).title}</>;
 }

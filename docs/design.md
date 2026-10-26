@@ -36,8 +36,9 @@ typed binaries.
 ┌──────────────── Tauri 2 app (desktop + iOS + Android) ────────────────┐
 │                                                                        │
 │  UI: Next.js (static export) + TypeScript                              │
-│   ├─ editor bound to a Loro replica (loro-crdt, WASM)                  │
-│   └─ talks to the core over Tauri IPC (Loro updates + queries)         │
+│   ├─ its own replica: the core compiled to WASM, answering queries     │
+│   ├─ editor (CodeMirror 6) bound to that replica                       │
+│   └─ talks to the core over Tauri IPC (snapshot in, Loro updates out)  │
 │                                                                        │
 │  Core: Rust                                                            │
 │   ├─ Loro document (one per graph): source of truth                    │
@@ -58,7 +59,13 @@ typed binaries.
   network discovery, and iOS evicts browser storage when it likes.
 - **The UI holds its own Loro replica.** It exchanges updates with the core over
   IPC, using the same protocol peers use with each other. Keystrokes are applied
-  locally in the UI, so typing never waits on IPC.
+  locally in the UI, so typing never waits on IPC. The replica is the Rust core
+  itself compiled to WASM (`quiddity-wasm`, over `quiddity-view`) rather than
+  Loro's JavaScript bindings, so the UI has one implementation of the graph
+  model, the index and the outliner's edits, and answers its own queries
+  (entities, references, favourites) without a round trip. The shell hands it a
+  snapshot at startup and applies the updates it sends back, a moment after the
+  last edit, saving each time.
 - **The headless node is the core run as a daemon.** It is a full peer owned by
   the user, not a dumb relay. That lets it keep full history and serve devices
   that have been offline for a long time.
@@ -71,6 +78,8 @@ crates/syntax    block Markdown syntax: properties, links, block refs
 crates/core      graph model, index, journals, text import/export
 crates/sync      sync protocol: messages, framing, per-connection sessions
 crates/node      sync over iroh, and the quiddity-node CLI and headless node
+crates/view      what a UI shows of a graph (queries) and its edits (outliner)
+crates/wasm      the graph replica for the browser: view, compiled to WASM
 fuzz/            cargo-fuzz targets
 crates/cli       import/export/fsck tooling (later)
 apps/app         Tauri 2 shell (not part of the Cargo workspace: needs webkit)
@@ -440,7 +449,21 @@ born:: 1970-01-01
 
 - **Outliner**: every bullet is a block. A block shows rendered Markdown and
   becomes a CodeMirror 6 editor bound to its `LoroText` when focused, much like
-  Logseq's edit-raw/view-rendered toggle.
+  Logseq's edit-raw/view-rendered toggle. What is typed goes into the text as
+  the splice that was typed (in UTF-16 units, which is what CodeMirror
+  counts), not as a diff, so concurrent edits merge as the typists meant.
+  Keys: Enter splits the block at the caret (the tail becomes the next
+  sibling, or the first child if there are children), Shift-Enter inserts a
+  newline, Tab and Shift-Tab indent and outdent, Backspace at the start joins
+  the block to the one before, Alt-Up and Alt-Down move it among its siblings,
+  the arrows move between blocks at the edges, and Escape leaves the editor.
+  Undo is the editor's own, per block while it is open; document-wide undo
+  (see [Undo](#undo)) is not wired up yet.
+- **Views stay in step.** The same block can be open in the main pane and a
+  secondary. Changes from elsewhere reach an open editor as the smallest edit
+  that turns its text into the graph's. Typing notifies other views after a
+  pause, and structure changes at once, so a view is not rebuilt per
+  keystroke.
 - **Pages** are entities. **Journals** are the default home: today's page, then
   earlier days as you scroll.
 - **Properties** are rendered as chips when a block isn't being edited, and
