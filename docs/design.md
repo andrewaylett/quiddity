@@ -68,7 +68,9 @@ Repository layout (Cargo workspace now; pnpm workspace once there is UI):
 ```
 crates/syntax    block Markdown syntax: properties, links, block refs
 crates/core      graph model, index, journals, text import/export
-crates/node      headless sync node binary (next)
+crates/sync      sync protocol: messages, framing, per-connection sessions
+crates/node      sync over iroh, and the quiddity-node CLI and headless node
+fuzz/            cargo-fuzz targets
 crates/cli       import/export/fsck tooling (later)
 apps/app         Tauri 2 shell (later)
 apps/ui          Next.js UI, static export (later)
@@ -304,13 +306,23 @@ live in the iroh-blobs store, not in the Loro document.
 
 ### Protocol
 
-1. On connecting, peers exchange their app and schema versions and their Loro
-   version vectors.
-2. Each sends the updates the other is missing (`export({ mode: "update", from })`).
-3. While connected, local updates are pushed as they happen, so live editing
-   syncs character by character.
-4. Each peer periodically sends an **acknowledgement**: the version vector it
-   has durably stored.
+Implemented in `crates/sync` (independent of transport) and `crates/node`
+(over iroh):
+
+1. On connecting, each side sends a **hello**: its graph's schema version
+   (none, for a blank replica) and its Loro version vector.
+2. A side that can't read the other's schema stops there, so a device that
+   is behind never imports data it doesn't understand. Otherwise it sends
+   the updates the other is missing.
+3. From then on, each side sends new updates whenever its graph changes,
+   whether by local edits or by updates from another peer. So live editing
+   syncs character by character, and a device in the middle relays. Each
+   session tracks what its peer has, including what the peer sent, so
+   nothing is sent twice or echoed back.
+4. Messages are length-prefixed frames on one QUIC stream. Unknown message
+   types are ignored, so newer versions can add messages.
+5. Not yet built: **acknowledgements** (the version vector a peer has durably
+   stored), which history compaction needs.
 
 ### Live edits versus stored history
 
