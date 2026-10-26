@@ -116,6 +116,15 @@ mod tests {
         let id = graph.ensure_ref_id(block)?;
         assert_eq!(graph.ensure_ref_id(block)?, id);
         assert_eq!(graph.text(block)?, format!("Quotable\nid:: {id}"));
+
+        let other = graph.create_block(Some(page), None, "status:: done")?;
+        let id = graph.ensure_ref_id(other)?;
+        assert_ne!(id, "done", "only an `id` property is an ID");
+        assert_eq!(graph.text(other)?, format!("status:: done\nid:: {id}"));
+
+        let empty = graph.create_block(Some(page), None, "")?;
+        let id = graph.ensure_ref_id(empty)?;
+        assert_eq!(graph.text(empty)?, format!("id:: {id}"));
         Ok(())
     }
 }

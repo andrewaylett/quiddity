@@ -109,11 +109,6 @@ impl Graph {
         }
     }
 
-    /// This replica's Loro peer ID.
-    pub fn peer_id(&self) -> u64 {
-        self.doc.peer_id()
-    }
-
     /// Exports the whole graph, history included.
     pub fn snapshot(&self) -> Result<Vec<u8>> {
         Ok(self.doc.export(ExportMode::Snapshot)?)

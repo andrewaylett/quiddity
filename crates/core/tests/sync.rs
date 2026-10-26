@@ -6,7 +6,7 @@ use common::{Op, apply, layout, op, sync, sync_all};
 use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest::sample::Index;
-use quiddity_core::{Graph, SCHEMA_VERSION};
+use quiddity_core::{Graph, SCHEMA_VERSION, Version};
 
 const REPLICAS: usize = 3;
 
@@ -64,6 +64,33 @@ fn addition() -> impl Strategy<Value = Addition> {
     ]
 }
 
+/// Sends `to` what it is missing from `from`, checking that versions say
+/// what each replica has: the protocol relies on them to send no more and
+/// no less than needed.
+fn send(from: &Graph, to: &Graph) -> Result<(), TestCaseError> {
+    let before = to.version();
+    prop_assert_eq!(&Version::decode(&before.encode()).unwrap(), &before);
+    let behind = !before.includes(&from.version());
+
+    let updates = from.updates_since(&before).unwrap();
+    to.import(&updates).unwrap();
+    let after = to.version();
+    let mut expected = before.clone();
+    expected.merge(&Graph::version_of_updates(&updates).unwrap());
+    prop_assert_eq!(&after, &expected, "the updates say what they bring");
+    prop_assert!(after.includes(&from.version()));
+    prop_assert_eq!(behind, after != before, "only news changes the version");
+    Ok(())
+}
+
+#[test]
+fn a_blank_replica_learns_the_schema_by_syncing() {
+    let (origin, blank) = (Graph::new(), Graph::blank());
+    assert_eq!(blank.schema_version(), None);
+    sync(&origin, &blank).unwrap();
+    assert_eq!(blank.schema_version(), Some(SCHEMA_VERSION));
+}
+
 proptest! {
     #![proptest_config(common::config(64))]
 
@@ -75,7 +102,10 @@ proptest! {
         for step in &steps {
             match *step {
                 Step::Edit(r, ref op) => apply(&replicas[r], op),
-                Step::Sync(a, b) => sync(&replicas[a], &replicas[b]).unwrap(),
+                Step::Sync(a, b) => {
+                    send(&replicas[a], &replicas[b])?;
+                    send(&replicas[b], &replicas[a])?;
+                }
                 Step::Restart(r) => {
                     replicas[r] = Graph::from_snapshot(&replicas[r].snapshot().unwrap()).unwrap();
                 }

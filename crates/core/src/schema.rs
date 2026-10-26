@@ -61,16 +61,44 @@ impl PropertySchema {
 
     /// Schemas for the properties Quiddity itself relies on.
     pub fn builtin(key: &str) -> Option<Self> {
-        use {Cardinality::*, Form::*, ValueType::*};
-        Some(match normalise_name(key).as_str() {
-            "type" => Self::new(Ref, Scalar, Many),
-            "alias" => Self::new(Text, Scalar, Many),
-            "date" => Self::new(Date, Scalar, One),
-            "favourite" => Self::new(Boolean, Scalar, One),
-            "id" | "title" | "value-type" | "form" | "cardinality" => Self::new(Text, Scalar, One),
-            _ => return None,
-        })
+        lookup(&normalise_name(key), BUILTIN)
     }
+}
+
+const BUILTIN: &[(&str, PropertySchema)] = {
+    use {Cardinality::*, Form::*, ValueType::*};
+    const fn s(t: ValueType, c: Cardinality) -> PropertySchema {
+        PropertySchema::new(t, Scalar, c)
+    }
+    &[
+        ("type", s(Ref, Many)),
+        ("alias", s(Text, Many)),
+        ("date", s(Date, One)),
+        ("favourite", s(Boolean, One)),
+        ("id", s(Text, One)),
+        ("title", s(Text, One)),
+        ("value-type", s(Text, One)),
+        ("form", s(Text, One)),
+        ("cardinality", s(Text, One)),
+    ]
+};
+
+/// How a property entity's `value-type::`, `form::` and `cardinality::` are
+/// spelt.
+const VALUE_TYPES: &[(&str, ValueType)] = &[
+    ("text", ValueType::Text),
+    ("number", ValueType::Number),
+    ("boolean", ValueType::Boolean),
+    ("date", ValueType::Date),
+    ("datetime", ValueType::DateTime),
+    ("ref", ValueType::Ref),
+];
+const FORMS: &[(&str, Form)] = &[("scalar", Form::Scalar), ("list", Form::List)];
+const CARDINALITIES: &[(&str, Cardinality)] =
+    &[("one", Cardinality::One), ("many", Cardinality::Many)];
+
+fn lookup<T: Copy>(name: &str, table: &[(&str, T)]) -> Option<T> {
+    table.iter().find(|(n, _)| *n == name).map(|&(_, v)| v)
 }
 
 impl Index {
@@ -82,24 +110,14 @@ impl Index {
         };
         let setting = |name| info.values(name).find_map(text).map(|s| normalise_name(&s));
         if let Some(t) = setting("value-type") {
-            schema.value_type = match t.as_str() {
-                "number" => ValueType::Number,
-                "boolean" => ValueType::Boolean,
-                "date" => ValueType::Date,
-                "datetime" => ValueType::DateTime,
-                "ref" => ValueType::Ref,
-                _ => ValueType::Text,
-            };
+            // An unknown type is read as text: nothing is lost that way.
+            schema.value_type = lookup(&t, VALUE_TYPES).unwrap_or(ValueType::Text);
         }
-        match setting("form").as_deref() {
-            Some("list") => schema.form = Form::List,
-            Some("scalar") => schema.form = Form::Scalar,
-            _ => {}
+        if let Some(form) = setting("form").and_then(|f| lookup(&f, FORMS)) {
+            schema.form = form;
         }
-        match setting("cardinality").as_deref() {
-            Some("one") => schema.cardinality = Cardinality::One,
-            Some("many") => schema.cardinality = Cardinality::Many,
-            _ => {}
+        if let Some(c) = setting("cardinality").and_then(|c| lookup(&c, CARDINALITIES)) {
+            schema.cardinality = c;
         }
         schema
     }
@@ -235,6 +253,40 @@ mod tests {
         Ok(())
     }
 
+    /// Every setting is read, whether written as text or as a link, and
+    /// overrides a built-in schema.
+    #[test]
+    fn every_setting_is_read() -> Result<()> {
+        let link = |name: &str| {
+            Value::Link(Link {
+                name: name.to_owned(),
+                qualifiers: Vec::new(),
+            })
+        };
+        for &(spelt, value_type) in VALUE_TYPES {
+            for (form, cardinality) in [(FORMS[0], CARDINALITIES[1]), (FORMS[1], CARDINALITIES[0])]
+            {
+                let graph = Graph::new();
+                // `date` is built in as a single date.
+                graph.create_entity(
+                    "Date",
+                    &[
+                        ("type", Some(t("property"))),
+                        ("value-type", Some(link(&spelt.to_uppercase()))),
+                        ("form", Some(t(form.0))),
+                        ("cardinality", Some(t(cardinality.0))),
+                    ],
+                )?;
+                assert_eq!(
+                    Index::build(&graph)?.schema("date"),
+                    PropertySchema::new(value_type, form.1, cardinality.1),
+                    "{spelt} {form:?} {cardinality:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
     #[test]
     fn builtin_types() {
         let date = PropertySchema::builtin("date").unwrap();
@@ -257,5 +309,79 @@ mod tests {
         let flag = PropertySchema::new(ValueType::Boolean, Form::Scalar, Cardinality::One);
         assert_eq!(coerce(&t("Yes"), &flag), Ok(Typed::Boolean(true)));
         assert_eq!(PropertySchema::builtin("Favourite"), Some(flag));
+
+        for (key, cardinality) in [("id", Cardinality::One), ("alias", Cardinality::Many)] {
+            assert_eq!(
+                PropertySchema::builtin(key).unwrap().cardinality,
+                cardinality
+            );
+        }
+    }
+
+    use proptest::prelude::*;
+
+    /// A typed value, and how a person might write it.
+    fn typed() -> impl Strategy<Value = (ValueType, Typed, Value)> {
+        let link = "[a-z ]{1,8}".prop_map(|name| Link {
+            name: name.trim().to_owned() + "x",
+            qualifiers: Vec::new(),
+        });
+        prop_oneof![
+            any::<String>().prop_map(|s| (ValueType::Text, Typed::Text(s.clone()), t(&s))),
+            link.clone().prop_map(|l| (
+                ValueType::Text,
+                Typed::Text(format_link(&l)),
+                Value::Link(l)
+            )),
+            "[a-z0-9-]{1,8}".prop_map(|id| (
+                ValueType::Text,
+                Typed::Text(format!("(({id}))")),
+                Value::BlockRef(id)
+            )),
+            any::<f64>()
+                .prop_filter("finite", |n| n.is_finite())
+                .prop_map(|n| (ValueType::Number, Typed::Number(n), t(&n.to_string()))),
+            (any::<bool>(), any::<bool>()).prop_map(|(b, short)| {
+                let word = match (b, short) {
+                    (true, false) => "true",
+                    (true, true) => "Yes",
+                    (false, false) => "False",
+                    (false, true) => "no",
+                };
+                (ValueType::Boolean, Typed::Boolean(b), t(word))
+            }),
+            (1i16..=9999, 1i8..=12, 1i8..=28).prop_map(|(y, m, d)| {
+                let date = Date::new(y, m, d).unwrap();
+                (ValueType::Date, Typed::Date(date), t(&date.to_string()))
+            }),
+            (Timestamp::MIN.as_second()..=Timestamp::MAX.as_second()).prop_map(|secs| {
+                let at = Timestamp::from_second(secs).unwrap();
+                (ValueType::DateTime, Typed::DateTime(at), t(&at.to_string()))
+            }),
+            link.prop_map(|l| (ValueType::Ref, Typed::Link(l.clone()), Value::Link(l))),
+            "[a-z0-9-]{1,8}".prop_map(|id| (
+                ValueType::Ref,
+                Typed::BlockRef(id.clone()),
+                Value::BlockRef(id)
+            )),
+        ]
+    }
+
+    proptest! {
+        /// Whatever is written for a type reads back as that value, alone or
+        /// in a list.
+        #[test]
+        fn coerce_reads_what_was_written(cases in proptest::collection::vec(typed(), 1..4)) {
+            let (value_type, expected, written) = cases[0].clone();
+            let scalar = PropertySchema::new(value_type, Form::Scalar, Cardinality::Many);
+            prop_assert_eq!(coerce(&written, &scalar), Ok(expected));
+
+            let same: Vec<_> = cases.iter().filter(|c| c.0 == value_type).collect();
+            let list = PropertySchema { form: Form::List, ..scalar };
+            prop_assert_eq!(
+                coerce(&Value::List(same.iter().map(|c| c.2.clone()).collect()), &list),
+                Ok(Typed::List(same.iter().map(|c| c.1.clone()).collect()))
+            );
+        }
     }
 }
