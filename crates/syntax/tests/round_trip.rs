@@ -92,6 +92,24 @@ proptest! {
         prop_assert_eq!(&p.key, &key);
         prop_assert_eq!(&p.value, &value);
         prop_assert_eq!(p.span.clone(), 0..src.len());
+
+        // References come from the value's structure: links and block refs
+        // at the top level or in a list, but not inside text or qualifiers.
+        let (mut links, mut refs) = (Vec::new(), Vec::new());
+        let items = match &value {
+            Some(Value::List(items)) => items.clone(),
+            Some(v) => vec![v.clone()],
+            None => Vec::new(),
+        };
+        for item in items {
+            match item {
+                Value::Link(l) => links.push(l),
+                Value::BlockRef(id) => refs.push(id),
+                _ => {}
+            }
+        }
+        prop_assert_eq!(&block.links, &links, "{}", src);
+        prop_assert_eq!(&block.block_refs, &refs, "{}", src);
     }
 
     #[test]

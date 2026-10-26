@@ -97,6 +97,11 @@ pub fn is_properties_block(text: &str) -> bool {
 /// `:`, `#`, brackets or parentheses. `::` must be followed by whitespace or
 /// the end of the line.
 pub fn parse_property_line(line: &str) -> Option<(String, Option<Value>)> {
+    split_property_line(line).map(|(key, value)| (key, value.map(parse_line_value)))
+}
+
+/// Splits a `key:: value` line into its key and unparsed value.
+fn split_property_line(line: &str) -> Option<(String, Option<&str>)> {
     let trimmed = line.trim_start();
     let sep = trimmed.find("::")?;
     let (key, rest) = (&trimmed[..sep], &trimmed[sep + 2..]);
@@ -107,10 +112,7 @@ pub fn parse_property_line(line: &str) -> Option<(String, Option<Value>)> {
         return None;
     }
     let rest = rest.trim();
-    Some((
-        key.to_owned(),
-        (!rest.is_empty()).then(|| parse_line_value(rest)),
-    ))
+    Some((key.to_owned(), (!rest.is_empty()).then_some(rest)))
 }
 
 /// Parses the value part of a `key:: value` line.
@@ -118,17 +120,45 @@ pub fn parse_property_line(line: &str) -> Option<(String, Option<Value>)> {
 /// A value that is exactly a list, quoted string, link or block reference is
 /// parsed as such; anything else is the text as written.
 pub fn parse_line_value(value: &str) -> Value {
+    line_value(value).0
+}
+
+/// A line value with the links and block references in it. As in inline
+/// values, those inside quoted text don't count.
+fn line_value(value: &str) -> (Value, Refs) {
     let mut sc = Scanner::new(value);
-    let mut links = Vec::new();
+    let mut refs = Refs::default();
     let parsed = if sc.at_list_start() {
-        parse_list(&mut sc, &mut links)
+        parse_list(&mut sc, &mut refs)
     } else {
-        parse_scalar(&mut sc, &[], &mut links)
+        parse_scalar(&mut sc, &[], &mut refs)
     };
     sc.skip_ws();
     match parsed {
-        Some(Some(v)) if sc.at_end() => v,
-        _ => Value::Text(value.to_owned()),
+        Some(Some(v)) if sc.at_end() => (v, refs),
+        _ => {
+            let mut scanned = Block::default();
+            scan_inline(value, 0, false, &mut scanned);
+            let refs = Refs {
+                links: scanned.links,
+                block_refs: scanned.block_refs,
+            };
+            (Value::Text(value.to_owned()), refs)
+        }
+    }
+}
+
+/// Links and block references found while parsing a value.
+#[derive(Default)]
+struct Refs {
+    links: Vec<Link>,
+    block_refs: Vec<String>,
+}
+
+impl Refs {
+    fn add_to(self, block: &mut Block) {
+        block.links.extend(self.links);
+        block.block_refs.extend(self.block_refs);
     }
 }
 
@@ -139,16 +169,18 @@ pub(crate) fn is_bare_key(key: &str) -> bool {
 }
 
 fn parse_line(line: &str, offset: usize, block: &mut Block) {
-    if let Some((key, value)) = parse_property_line(line) {
+    if let Some((key, value)) = split_property_line(line) {
+        let value = value.map(|v| {
+            let (value, refs) = line_value(v);
+            refs.add_to(block);
+            value
+        });
         block.properties.push(Property {
             key,
             value,
             style: PropertyStyle::Line,
             span: offset..offset + line.len(),
         });
-        // Keys can't contain `:`, so the first `::` is the separator.
-        let start = line.find("::").map_or(line.len(), |i| i + 2);
-        scan_inline(&line[start..], offset + start, false, block);
     } else {
         scan_inline(line, offset, true, block);
     }
@@ -179,11 +211,11 @@ fn scan_inline(line: &str, offset: usize, tags: bool, block: &mut Block) {
             {
                 sc.pos += 1;
                 if let Some(key) = parse_key(&mut sc) {
-                    let mut links = Vec::new();
+                    let mut refs = Refs::default();
                     let value = match sc.peek() {
-                        Some('(') => match parse_paren_value(&mut sc, &mut links) {
+                        Some('(') => match parse_paren_value(&mut sc, &mut refs) {
                             Some(value) => {
-                                block.links.append(&mut links);
+                                refs.add_to(block);
                                 value
                             }
                             None => None,
@@ -284,30 +316,30 @@ fn parse_key(sc: &mut Scanner) -> Option<String> {
 
 /// Parses `(value)`. The outer `None` means it wasn't well-formed (and the
 /// scanner hasn't moved); the inner `None` means `()`.
-fn parse_paren_value(sc: &mut Scanner, links: &mut Vec<Link>) -> Option<Option<Value>> {
+fn parse_paren_value(sc: &mut Scanner, refs: &mut Refs) -> Option<Option<Value>> {
     let start = sc.pos;
-    let result = parse_paren_value_inner(sc, links);
+    let result = parse_paren_value_inner(sc, refs);
     if result.is_none() {
         sc.pos = start;
     }
     result
 }
 
-fn parse_paren_value_inner(sc: &mut Scanner, links: &mut Vec<Link>) -> Option<Option<Value>> {
+fn parse_paren_value_inner(sc: &mut Scanner, refs: &mut Refs) -> Option<Option<Value>> {
     if !sc.eat("(") {
         return None;
     }
     sc.skip_ws();
     let value = if sc.at_list_start() {
-        parse_list(sc, links)?
+        parse_list(sc, refs)?
     } else {
-        parse_scalar(sc, &[')'], links)?
+        parse_scalar(sc, &[')'], refs)?
     };
     sc.skip_ws();
     sc.eat(")").then_some(value)
 }
 
-fn parse_list(sc: &mut Scanner, links: &mut Vec<Link>) -> Option<Option<Value>> {
+fn parse_list(sc: &mut Scanner, refs: &mut Refs) -> Option<Option<Value>> {
     sc.eat("[");
     let mut items = Vec::new();
     sc.skip_ws();
@@ -315,7 +347,7 @@ fn parse_list(sc: &mut Scanner, links: &mut Vec<Link>) -> Option<Option<Value>> 
         return Some(Some(Value::List(items)));
     }
     loop {
-        let item = parse_scalar(sc, &[',', ']'], links)?;
+        let item = parse_scalar(sc, &[',', ']'], refs)?;
         items.push(item.unwrap_or_else(|| Value::Text(String::new())));
         sc.skip_ws();
         if sc.eat("]") {
@@ -329,7 +361,7 @@ fn parse_list(sc: &mut Scanner, links: &mut Vec<Link>) -> Option<Option<Value>> 
 
 /// Parses a single value up to one of `terms` (or the end, if `terms` is
 /// empty). Brackets and parentheses inside it must balance.
-fn parse_scalar(sc: &mut Scanner, terms: &[char], links: &mut Vec<Link>) -> Option<Option<Value>> {
+fn parse_scalar(sc: &mut Scanner, terms: &[char], refs: &mut Refs) -> Option<Option<Value>> {
     sc.skip_ws();
     if sc.peek() == Some('"') {
         return parse_quoted(sc).map(|s| Some(Value::Text(s)));
@@ -355,11 +387,14 @@ fn parse_scalar(sc: &mut Scanner, terms: &[char], links: &mut Vec<Link>) -> Opti
         if sc.rest().starts_with("[[") {
             if let Some(link) = parse_link(sc) {
                 text.push_str(&sc.src[at..sc.pos]);
-                links.push(link);
+                refs.links.push(link);
                 continue;
             }
-        } else if sc.rest().starts_with("((") && parse_block_ref(sc).is_some() {
+        } else if sc.rest().starts_with("((")
+            && let Some(id) = parse_block_ref(sc)
+        {
             text.push_str(&sc.src[at..sc.pos]);
+            refs.block_refs.push(id);
             continue;
         }
         match c {
@@ -458,7 +493,7 @@ fn parse_structured_link(sc: &mut Scanner) -> Option<Link> {
     let mut qualifiers = Vec::new();
     while sc.eat("#") {
         let key = parse_key(sc)?;
-        let mut ignored = Vec::new();
+        let mut ignored = Refs::default();
         let value = match sc.peek() {
             Some('(') => parse_paren_value(sc, &mut ignored)?,
             _ => None,
@@ -738,9 +773,12 @@ mod tests {
     }
 
     #[test]
-    fn links_in_property_values() {
-        let block = parse_block("author:: [[Jane]]\n#with([[Bob]])");
-        assert_eq!(block.links, vec![link("Jane"), link("Bob")]);
+    fn references_in_property_values() {
+        let block = parse_block(
+            "author:: [[Jane]]\nsee:: ((a)) and [[Ann]]\nquoted:: \"[[No]] ((no))\"\n#with([[Bob]]) #at(((b))) #q(\"[[No]]\")",
+        );
+        assert_eq!(block.links, vec![link("Jane"), link("Ann"), link("Bob")]);
+        assert_eq!(block.block_refs, vec!["a".to_owned(), "b".to_owned()]);
     }
 
     #[test]
