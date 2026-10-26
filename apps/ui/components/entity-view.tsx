@@ -41,7 +41,7 @@ function Inline({ text, links }: { text: string; links: Record<string, LinkTarge
   return parts.map((p, i) => <Fragment key={i}>{p}</Fragment>);
 }
 
-function Outline({ blocks, links }: { blocks: Block[]; links: Record<string, LinkTarget> }) {
+export function Outline({ blocks, links }: { blocks: Block[]; links: Record<string, LinkTarget> }) {
   return (
     <ul className="space-y-1">
       {blocks.map((block) => (

@@ -23,6 +23,14 @@ export interface Entity extends EntityRef {
   links: Record<string, LinkTarget>;
 }
 
+/** The blocks of one entity that mention another. */
+export interface Reference {
+  source: EntityRef;
+  /** Each with its children, for context. */
+  blocks: Block[];
+  links: Record<string, LinkTarget>;
+}
+
 /**
  * What the UI needs from the core. The Tauri shell implements it over IPC;
  * fixtures stand in when the UI runs in a plain browser. Promises must be
@@ -33,7 +41,11 @@ export interface Store {
   favourites(): Promise<EntityRef[]>;
   /** Every entity, by name. */
   entities(): Promise<EntityRef[]>;
-  /** Today's journal page. */
-  today(): Promise<EntityRef>;
+  /** Journal pages from today back, newest first. */
+  journals(): Promise<EntityRef[]>;
   entity(id: EntityId): Promise<Entity>;
+  /** Blocks that link to the entity, by the entity they are in. */
+  references(id: EntityId): Promise<Reference[]>;
+  /** Blocks that mention the entity by name without linking to it. */
+  unlinkedReferences(id: EntityId): Promise<Reference[]>;
 }

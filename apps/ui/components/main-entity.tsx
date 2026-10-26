@@ -6,6 +6,7 @@ import { recordVisit } from "@/lib/recents";
 import { store } from "@/lib/store";
 import { Region, Skeleton } from "./boundary";
 import { EntityBody, EntityTitle } from "./entity-view";
+import { References } from "./references";
 
 function Visit({ id }: { id: EntityId }) {
   const entity = use(store.entity(id));
@@ -39,6 +40,7 @@ export function MainEntity({ id }: { id: EntityId }) {
         </h1>
         <EntityBody id={id} />
       </Region>
+      <References id={id} />
     </article>
   );
 }
