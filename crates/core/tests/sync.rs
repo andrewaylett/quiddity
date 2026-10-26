@@ -3,12 +3,18 @@
 mod common;
 
 use common::{Op, apply, layout, op, sync, sync_all};
+use jiff::{SignedDuration, Timestamp};
 use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest::sample::Index;
 use quiddity_core::{Graph, SCHEMA_VERSION, Version};
 
 const REPLICAS: usize = 3;
+const ACTIVE: SignedDuration = SignedDuration::from_hours(24 * 30);
+
+fn now() -> Timestamp {
+    "2026-10-26T12:00:00Z".parse().unwrap()
+}
 
 #[derive(Debug, Clone)]
 enum Step {
@@ -16,10 +22,21 @@ enum Step {
     Sync(usize, usize),
     /// The device restarts, reloading from its own snapshot.
     Restart(usize),
-    /// The device catches up with everyone, then drops the history they all
-    /// have. Having everything any replica has, nothing can arrive later
-    /// that was made on the history it drops.
+    /// The device records that it has stored what it has.
+    Store(usize),
+    /// The device drops the history every device has stored, if its
+    /// compaction point says that's safe.
     Compact(usize),
+}
+
+impl Step {
+    /// The replica a step acts on alone.
+    fn replica(&self) -> Option<usize> {
+        match *self {
+            Step::Edit(r, _) | Step::Restart(r) | Step::Store(r) | Step::Compact(r) => Some(r),
+            Step::Sync(..) => None,
+        }
+    }
 }
 
 fn step() -> impl Strategy<Value = Step> {
@@ -27,6 +44,7 @@ fn step() -> impl Strategy<Value = Step> {
         6 => (0..REPLICAS, op()).prop_map(|(r, op)| Step::Edit(r, op)),
         2 => (0..REPLICAS, 0..REPLICAS).prop_map(|(a, b)| Step::Sync(a, b)),
         1 => (0..REPLICAS).prop_map(Step::Restart),
+        2 => (0..REPLICAS).prop_map(Step::Store),
         2 => (0..REPLICAS).prop_map(Step::Compact),
     ]
 }
@@ -34,9 +52,45 @@ fn step() -> impl Strategy<Value = Step> {
 /// One replica that made the graph, one that joined from its snapshot, and
 /// one that started blank and only ever receives updates.
 fn replicas() -> Vec<Graph> {
+    // The device that makes a graph records itself from the start, and
+    // vouches for each device it hands the graph to.
     let origin = Graph::new();
+    origin.record_stored("0", now()).unwrap();
+    origin.vouch_for("1", &origin.version(), now()).unwrap();
     let joined = Graph::from_snapshot(&origin.snapshot().unwrap()).unwrap();
     vec![origin, joined, Graph::blank()]
+}
+
+/// Syncs two of the replicas. Each that has something to give vouches for
+/// the other first, as a device does for a peer it hasn't heard of.
+fn meet(replicas: &mut [Graph], a: usize, b: usize) -> Result<(), TestCaseError> {
+    for (x, y) in [(a, b), (b, a)] {
+        if !blank(&replicas[x]) {
+            let theirs = replicas[y].version();
+            replicas[x]
+                .vouch_for(&y.to_string(), &theirs, now())
+                .unwrap();
+        }
+    }
+    bring_up_to_date(replicas, a, b)?;
+    bring_up_to_date(replicas, b, a)
+}
+
+/// Sends updates, or, to a blank replica behind `from`'s history, a
+/// snapshot to start from. Compacting by the device list means no other
+/// replica is ever behind.
+fn bring_up_to_date(replicas: &mut [Graph], from: usize, to: usize) -> Result<(), TestCaseError> {
+    if replicas[from].can_update(&replicas[to].version()) {
+        return send(&replicas[from], &replicas[to]);
+    }
+    prop_assert!(blank(&replicas[to]), "only a blank replica is ever behind");
+    replicas[to] = Graph::from_snapshot(&replicas[from].snapshot().unwrap()).unwrap();
+    Ok(())
+}
+
+/// A replica that has yet to join: it has nothing to edit or store.
+fn blank(graph: &Graph) -> bool {
+    graph.version() == Version::default()
 }
 
 /// Edits that only add: no deletions and no rewrites of text, so nothing
@@ -196,36 +250,35 @@ fn a_blank_replica_learns_the_schema_by_syncing() {
 proptest! {
     #![proptest_config(common::config(64))]
 
-    /// However edits and syncs interleave, once everyone has synced all
-    /// replicas hold the same graph, and a snapshot reproduces it.
+    /// However edits, syncs and compaction interleave, once everyone has
+    /// synced all replicas hold the same graph, and a snapshot reproduces it.
+    /// Compacting only where `compaction_point` allows never leaves a replica
+    /// unable to send or receive: `send` would fail.
     #[test]
     fn replicas_converge(steps in vec(step(), 1..60)) {
         let mut replicas = replicas();
         for step in &steps {
             match *step {
+                _ if step.replica().is_some_and(|r| blank(&replicas[r])) => {}
                 Step::Edit(r, ref op) => apply(&replicas[r], op),
-                Step::Sync(a, b) => {
-                    send(&replicas[a], &replicas[b])?;
-                    send(&replicas[b], &replicas[a])?;
-                }
+                Step::Sync(a, b) => meet(&mut replicas, a, b)?,
                 Step::Restart(r) => {
                     replicas[r] = Graph::from_snapshot(&replicas[r].snapshot().unwrap()).unwrap();
                 }
+                Step::Store(r) => replicas[r].record_stored(&r.to_string(), now()).unwrap(),
                 Step::Compact(r) => {
-                    for o in 0..REPLICAS {
-                        send(&replicas[o], &replicas[r])?;
-                    }
-                    let shared = replicas.iter().map(Graph::version).reduce(|a, b| a.meet(&b)).unwrap();
+                    let Some(at) = replicas[r].compaction_point(now(), ACTIVE) else { continue };
                     let before = layout(&replicas[r]);
-                    replicas[r] = Graph::from_snapshot(&replicas[r].shallow_snapshot(&shared).unwrap()).unwrap();
+                    replicas[r] = Graph::from_snapshot(&replicas[r].shallow_snapshot(&at).unwrap()).unwrap();
                     prop_assert_eq!(layout(&replicas[r]), before);
-                    for other in &replicas {
-                        prop_assert!(replicas[r].can_update(&other.version()));
-                    }
                 }
             }
         }
-        sync_all(&replicas).unwrap();
+        for _ in 0..2 {
+            for (a, b) in [(0, 1), (0, 2), (1, 2)] {
+                meet(&mut replicas, a, b)?;
+            }
+        }
 
         let expected = layout(&replicas[0]);
         for replica in &replicas {

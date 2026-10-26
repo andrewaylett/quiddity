@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc c3375a820f074ffb7ed0de56d0ccd71a5e25994612cf47ba0fd11b63fd6b97f4 # shrinks to steps = [Create { replica: 2, parent: None }, Sync(0, 2), Append { replica: 0, block: Index(0) }, Append { replica: 2, block: Index(0) }]
 cc 8a624b2ad91bffbb2c87ea3979a595331db5959cf07d213fc3f4f032fd61e4f3 # shrinks to steps = [Edit(2, Create { parent: None, at: Index(0), text: "" }), Sync(2, 0), Compact(1)]
+cc 571a55ec671f62c643244a420f310684ce3efda8b1bfbd9b2c32d75141211776 # shrinks to steps = [Edit(0, Create { parent: None, at: Index(0), text: "" }), Compact(1), Sync(2, 1), Compact(1)]

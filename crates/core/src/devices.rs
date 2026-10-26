@@ -1,0 +1,185 @@
+//! The devices holding replicas of a graph, and what each has stored.
+//!
+//! This is sync metadata rather than content: it lives in its own map in the
+//! graph's document, not in any block, so it is never exported. Each device
+//! writes only its own entry, so entries never conflict.
+
+use jiff::{SignedDuration, Timestamp};
+use loro::{Container, LoroValue, ValueOrContainer};
+
+use crate::{Graph, Result, Version};
+
+const DEVICES: &str = "devices";
+const STORED: &str = "stored";
+const SEEN: &str = "seen";
+
+/// A device as it last recorded itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Device {
+    pub id: String,
+    /// The version the device had durably stored.
+    pub stored: Version,
+    /// When it recorded that.
+    pub seen: Timestamp,
+}
+
+impl Graph {
+    /// Records that the device `id` has stored this replica as it is now.
+    /// Call it just before saving: the record is an edit, saved along with
+    /// what it describes. It syncs to other devices like any edit.
+    pub fn record_stored(&self, id: &str, now: Timestamp) -> Result<()> {
+        let stored = self.version();
+        let entry = self.doc().get_map(DEVICES).ensure_mergeable_map(id)?;
+        entry.insert(STORED, stored.encode())?;
+        entry.insert(SEEN, now.as_millisecond())?;
+        self.commit();
+        Ok(())
+    }
+
+    /// Records the device `id`, which this replica is about to bring up to
+    /// date from `stored`, unless it is already known. Until a newcomer
+    /// records itself, this is what stops devices compacting past what it
+    /// has: every record this replica made before is included in what the
+    /// newcomer receives, and every later one arrives with this one.
+    pub fn vouch_for(&self, id: &str, stored: &Version, now: Timestamp) -> Result<()> {
+        let devices = self.doc().get_map(DEVICES);
+        if devices.get(id).is_some() {
+            return Ok(());
+        }
+        let entry = devices.ensure_mergeable_map(id)?;
+        entry.insert(STORED, stored.encode())?;
+        entry.insert(SEEN, now.as_millisecond())?;
+        self.commit();
+        Ok(())
+    }
+
+    /// Every device that has recorded itself, in no particular order.
+    /// Entries this build can't read are skipped.
+    pub fn devices(&self) -> Vec<Device> {
+        let mut devices = Vec::new();
+        self.doc().get_map(DEVICES).for_each(|id, entry| {
+            let ValueOrContainer::Container(Container::Map(entry)) = entry else {
+                return;
+            };
+            let stored = match entry.get(STORED) {
+                Some(ValueOrContainer::Value(LoroValue::Binary(b))) => Version::decode(&b).ok(),
+                _ => None,
+            };
+            let seen = match entry.get(SEEN) {
+                Some(ValueOrContainer::Value(LoroValue::I64(ms))) => {
+                    Timestamp::from_millisecond(ms).ok()
+                }
+                _ => None,
+            };
+            if let (Some(stored), Some(seen)) = (stored, seen) {
+                devices.push(Device {
+                    id: id.to_owned(),
+                    stored,
+                    seen,
+                });
+            }
+        });
+        devices
+    }
+
+    /// The version this replica can safely compact at (see
+    /// [`Graph::shallow_snapshot`]): what every device seen within `active`
+    /// of `now` has stored. It's only safe once this replica has everything
+    /// any of them has stored, since an edit made before its device recorded
+    /// itself may have been made on older history; after that, a device's
+    /// edits are made on what it recorded. So until then, there is none.
+    ///
+    /// A device silent for longer than `active` stops holding compaction
+    /// back. If it returns with edits made on history others have dropped,
+    /// they can't be applied.
+    pub fn compaction_point(&self, now: Timestamp, active: SignedDuration) -> Option<Version> {
+        let stored: Vec<Version> = self
+            .devices()
+            .into_iter()
+            .filter(|d| now.duration_since(d.seen) <= active)
+            .map(|d| d.stored)
+            .collect();
+        let everything = stored.iter().fold(Version::default(), |mut all, v| {
+            all.merge(v);
+            all
+        });
+        if !self.version().includes(&everything) {
+            return None;
+        }
+        stored.into_iter().reduce(|a, b| a.meet(&b))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(s: &str) -> Timestamp {
+        s.parse().unwrap()
+    }
+
+    const MONTH: SignedDuration = SignedDuration::from_hours(24 * 30);
+
+    #[test]
+    fn records_read_back_and_vouching_defers_to_them() -> Result<()> {
+        let graph = Graph::new();
+        graph.vouch_for("new", &Version::default(), at("2026-10-01T00:00Z"))?;
+        let vouched = graph.version();
+        graph.record_stored("me", at("2026-10-02T00:00Z"))?;
+        graph.vouch_for("me", &Version::default(), at("2026-10-03T00:00Z"))?;
+
+        let mut devices = graph.devices();
+        devices.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(
+            devices,
+            [
+                Device {
+                    id: "me".into(),
+                    stored: vouched,
+                    seen: at("2026-10-02T00:00Z"),
+                },
+                Device {
+                    id: "new".into(),
+                    stored: Version::default(),
+                    seen: at("2026-10-01T00:00Z"),
+                },
+            ]
+        );
+        Ok(())
+    }
+
+    /// A device vouched for at the version it says it has, before its edits
+    /// have arrived, holds compaction back until they do.
+    #[test]
+    fn compaction_waits_for_everything_stored() -> Result<()> {
+        let now = at("2026-10-26T00:00Z");
+        let (a, b) = (Graph::new(), Graph::blank());
+        a.record_stored("a", now)?;
+        b.import(&a.snapshot()?)?;
+        b.create_block(None, None, "only on b")?;
+        b.commit();
+
+        a.vouch_for("b", &b.version(), now)?;
+        assert_eq!(a.compaction_point(now, MONTH), None);
+        a.import(&b.updates_since(&a.version())?)?;
+        assert!(a.compaction_point(now, MONTH).is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn silent_devices_stop_holding_compaction_back() -> Result<()> {
+        let graph = Graph::new();
+        graph.vouch_for("silent", &Version::default(), at("2026-01-01T00:00Z"))?;
+        graph.record_stored("me", at("2026-10-26T00:00Z"))?;
+        let point = |now: &str| graph.compaction_point(at(now), MONTH);
+        assert_eq!(point("2026-01-15T00:00Z"), Some(Version::default()));
+        let stored = graph
+            .devices()
+            .into_iter()
+            .find(|d| d.id == "me")
+            .unwrap()
+            .stored;
+        assert_eq!(point("2026-10-27T00:00Z"), Some(stored));
+        Ok(())
+    }
+}

@@ -67,8 +67,9 @@ typed binaries.
   snapshot at startup and applies the updates it sends back, a moment after the
   last edit, saving each time.
 - **The headless node is the core run as a daemon.** It is a full peer owned by
-  the user, not a dumb relay. That lets it keep full history and serve devices
-  that have been offline for a long time.
+  the user, not a dumb relay. It follows the same rules as every other
+  device; being always on, it is what lets devices that are never online
+  together sync.
 
 Repository layout (a Cargo workspace for the crates, a pnpm workspace for the
 apps):
@@ -331,30 +332,42 @@ Implemented in `crates/sync` (independent of transport) and `crates/node`
    nothing is sent twice or echoed back.
 4. Messages are length-prefixed frames on one QUIC stream. Unknown message
    types are ignored, so newer versions can add messages.
-5. Not yet built: **acknowledgements** (the version vector a peer has durably
-   stored), which history compaction needs.
+5. Acknowledgements aren't messages: each device records what it has
+   stored in the graph itself (below), which syncs like any edit.
 
 ### Live edits versus stored history
 
-These follow your original read-marker idea, but the markers live in sync
-metadata rather than inside the documents being edited:
+Every update is sent live, at full detail, to whichever peers are online.
+Stored history is compacted, and every device follows the same rule: none
+is special, the headless node included.
 
-- Every update is sent live at full detail to whichever peers are online.
-- Each device records, for every peer, the most recent acknowledgement it has
-  received from that peer.
-- **The headless node keeps full history** for at least as long as it is
-  needed to catch up the slowest device it still knows about.
-- **Portable devices keep shallow history.** They periodically replace their
-  stored document with a Loro shallow snapshot taken at the earlier of two
-  points:
-  - the version the headless node has acknowledged, since history before that
-    can always be fetched from the node again;
-  - the start of the local undo stack.
-- **Eviction.** A device that hasn't acknowledged anything for N days
-  (configurable; 30 by default) stops holding back the node's compaction. When
-  it next connects it re-syncs from a snapshot. Its unsynced local edits are
-  saved as a diff against the fresh snapshot and offered for re-application.
-  Exactly how is an open question.
+- **Each device records what it has stored.** The graph holds a map from
+  device ID to the version that device last durably stored and when. It is
+  sync metadata, so it lives beside the blocks rather than in them, and is
+  never exported. (Authorising devices is separate; see above.) A device
+  writes its record just before saving, so the record is saved with what it
+  describes, and writes only its own entry, so entries never conflict.
+- **Newcomers are vouched for.** A device handing the graph to one it
+  hasn't heard of records the newcomer at the newcomer's own version, until
+  the newcomer records itself. The device that creates a graph records
+  itself from the start. Then any device that might compact past a
+  newcomer's history has heard of it: records made before the vouch are
+  included in what the newcomer received, and later ones arrive with it.
+- **A device compacts at what every device has stored**, by replacing its
+  stored document with a Loro shallow snapshot taken there, but only once it
+  has everything any device has stored. An edit can be made on history a
+  device has dropped only if it was made before its author recorded
+  storing it, and by then the compacting device has it. Undo will bound
+  this further: never past the start of the local undo stack.
+- **A replica can't update a peer behind its history**, since the updates
+  would never apply. A blank peer is sent a snapshot instead. Any other peer
+  behind is one that was evicted (below).
+- **Eviction.** A device that hasn't recorded anything for N days
+  (configurable; 30 by default) stops holding back compaction. If it
+  returns, edits it made on history others have dropped can't be applied.
+  It re-syncs from a snapshot, and its unsynced edits are saved as a diff
+  against the fresh snapshot and offered for re-application. Exactly how is
+  an open question.
 
 ### Undo
 

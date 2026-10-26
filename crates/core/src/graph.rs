@@ -207,6 +207,10 @@ impl Graph {
         self.doc.commit();
     }
 
+    pub(crate) fn doc(&self) -> &LoroDoc {
+        &self.doc
+    }
+
     fn tree(&self) -> LoroTree {
         self.doc.get_tree(BLOCKS)
     }
