@@ -7,7 +7,7 @@ use std::time::Duration;
 use iroh::endpoint::presets;
 use iroh::protocol::Router;
 use iroh::{Endpoint, EndpointAddr, RelayMode};
-use quiddity_core::{BlockId, Graph};
+use quiddity_core::{BlockId, Graph, Index, ensure_journal};
 use quiddity_node::{ALPN, Allowed, Peer};
 
 /// A peer listening on localhost only: no relays, no address lookup.
@@ -104,6 +104,57 @@ async fn devices_that_never_meet_sync_through_a_node() {
 
     tasks.iter().for_each(tokio::task::JoinHandle::abort);
     for router in [node_router, phone_router, laptop_router] {
+        router.shutdown().await.unwrap();
+    }
+}
+
+/// Two devices that each started the day's journal while apart: the node
+/// merges them, and the devices (which don't merge for themselves here)
+/// get the merge while they stay connected.
+#[tokio::test]
+async fn merges_reach_connected_devices() {
+    let date = "2026-10-26".parse().unwrap();
+    let node = Peer::new(Graph::new(), Allowed::Any);
+    let devices = [
+        Peer::new(Graph::blank(), Allowed::Any),
+        Peer::new(Graph::blank(), Allowed::Any),
+    ];
+    for (i, device) in devices.iter().enumerate() {
+        let graph = device.graph();
+        let journal = ensure_journal(graph, &Index::build(graph).unwrap(), date).unwrap();
+        graph
+            .create_block(Some(journal), None, &format!("from device {i}"))
+            .unwrap();
+        graph.commit();
+    }
+
+    let (node_router, node_addr) = listen(&node).await;
+    let mut routers = Vec::new();
+    let mut tasks = Vec::new();
+    for device in &devices {
+        let (router, _) = listen(device).await;
+        let (device, endpoint, addr) =
+            (device.clone(), router.endpoint().clone(), node_addr.clone());
+        tasks.push(tokio::spawn(async move {
+            device.connect(&endpoint, addr, None).await
+        }));
+        routers.push(router);
+    }
+    let all = [&node, &devices[0], &devices[1]];
+    converged(&all).await;
+    assert_eq!(Index::build(node.graph()).unwrap().duplicates().count(), 1);
+
+    assert!(node.tidy().unwrap(), "the duplicate's entry moves");
+    assert!(!node.tidy().unwrap(), "and then there's nothing to do");
+    converged(&all).await;
+    let graph = devices[0].graph();
+    let journal = Index::build(graph).unwrap().journal(date).unwrap();
+    let entries = graph.children(journal).len() - 1; // and the properties
+    assert_eq!(entries, 2);
+
+    tasks.iter().for_each(tokio::task::JoinHandle::abort);
+    node_router.shutdown().await.unwrap();
+    for router in routers {
         router.shutdown().await.unwrap();
     }
 }

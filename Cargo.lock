@@ -3125,6 +3125,7 @@ dependencies = [
  "anyhow",
  "clap",
  "iroh",
+ "jiff",
  "quiddity-core",
  "quiddity-sync",
  "tempfile",

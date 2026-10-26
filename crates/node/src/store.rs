@@ -74,3 +74,28 @@ impl Store {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_device_key_is_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::new(tmp.path());
+        let key = store.key().unwrap();
+        assert_eq!(store.key().unwrap().public(), key.public());
+
+        fs::write(tmp.path().join(KEY), b"short").unwrap();
+        assert_eq!(store.key().unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// A key that can't be read is reported as it is, and never replaced.
+    #[test]
+    fn an_unreadable_key_is_reported() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join(KEY)).unwrap();
+        let err = Store::new(tmp.path()).key().unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::IsADirectory);
+    }
+}
