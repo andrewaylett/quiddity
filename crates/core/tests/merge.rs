@@ -37,7 +37,7 @@ fn step() -> impl Strategy<Value = Step> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(64))]
+    #![proptest_config(common::config(64))]
 
     #[test]
     fn journals_merge_without_losing_writes(steps in vec(step(), 1..40)) {
