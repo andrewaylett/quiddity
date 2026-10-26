@@ -76,6 +76,15 @@ Each layer is property-tested on its own, with system tests on top:
 | protocol | sessions over a simulated network with drops and relays; arbitrary peer input is fuzzed |
 | system | graph → export → import round trip; real iroh connections; the CLI end to end |
 
+The UI has browser tests (Playwright, against the static export, on the
+in-memory graph), which cover editing, undo, journals and references:
+
+```sh
+pnpm ui build
+pnpm --filter @quiddity/ui exec playwright install chromium   # once
+pnpm ui test:e2e
+```
+
 ```sh
 cargo fmt --all --check
 cargo clippy --all-targets
