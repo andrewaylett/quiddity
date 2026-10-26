@@ -1,5 +1,5 @@
-import { HomeEntity } from "@/components/home-entity";
+import { JournalFeed } from "@/components/journal-feed";
 
 export default function Home() {
-  return <HomeEntity />;
+  return <JournalFeed />;
 }

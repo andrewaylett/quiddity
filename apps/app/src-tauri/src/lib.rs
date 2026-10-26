@@ -9,7 +9,7 @@ mod session;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use session::{Entity, EntityRef, Error, Session};
+use session::{Entity, EntityRef, Error, Reference, Session};
 use tauri::{Manager, State};
 
 type Shared<'a> = State<'a, Mutex<Session>>;
@@ -35,8 +35,18 @@ async fn entities(state: Shared<'_>) -> Result<Vec<EntityRef>, Error> {
 }
 
 #[tauri::command]
-async fn today(state: Shared<'_>) -> Result<EntityRef, Error> {
-    with(state, |s| s.today())
+async fn journals(state: Shared<'_>) -> Result<Vec<EntityRef>, Error> {
+    with(state, |s| s.journals())
+}
+
+#[tauri::command]
+async fn references(state: Shared<'_>, id: String) -> Result<Vec<Reference>, Error> {
+    with(state, |s| s.references(&id))
+}
+
+#[tauri::command]
+async fn unlinked_references(state: Shared<'_>, id: String) -> Result<Vec<Reference>, Error> {
+    with(state, |s| s.unlinked_references(&id))
 }
 
 #[tauri::command]
@@ -62,7 +72,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            favourites, entities, today, entity
+            favourites,
+            entities,
+            journals,
+            entity,
+            references,
+            unlinked_references
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Quiddity app");

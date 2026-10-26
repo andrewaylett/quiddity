@@ -441,13 +441,17 @@ born:: 1970-01-01
 - **Outliner**: every bullet is a block. A block shows rendered Markdown and
   becomes a CodeMirror 6 editor bound to its `LoroText` when focused, much like
   Logseq's edit-raw/view-rendered toggle.
-- **Pages** are entities. **Journals** are the default home: today's page plus
-  scroll-back.
+- **Pages** are entities. **Journals** are the default home: today's page, then
+  earlier days as you scroll.
 - **Properties** are rendered as chips when a block isn't being edited, and
   as their Markdown when it is. The schema drives the editing aids (date
   picker, reference autocomplete, etc), which write Markdown into the text.
-- **Linked and unlinked references** appear at the foot of every entity page.
-  Disambiguation pages are as described above.
+- **Linked and unlinked references** appear at the foot of every entity page,
+  grouped by the entity they are in (journals first, newest first). Unlinked
+  references are whole-word, case-insensitive mentions of the entity's name or
+  an alias in prose: not inside a link, not in a properties block, and not in a
+  journal's own date. They are found on request, since that means reading every
+  block. Disambiguation pages are as described above.
 - **Presence**: other devices or users editing the same block appear as
   cursors, via the presence ALPN.
 - Later: queries over properties, table and board views by type, and a

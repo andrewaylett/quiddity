@@ -1,4 +1,12 @@
-import type { Block, Entity, EntityId, EntityRef, LinkTarget, Store } from "./model";
+import type {
+  Block,
+  Entity,
+  EntityId,
+  EntityRef,
+  LinkTarget,
+  Reference,
+  Store,
+} from "./model";
 
 const b = (id: string, text: string, ...children: Block[]): Block => ({
   id,
@@ -6,12 +14,23 @@ const b = (id: string, text: string, ...children: Block[]): Block => ({
   children,
 });
 
-const entities: Omit<Entity, "links">[] = [
-  {
-    id: "journals",
-    title: "Journals",
-    blocks: [b("j1", "Today's page, then scroll-back.")],
-  },
+type Raw = Omit<Entity, "links">;
+
+const days = Array.from({ length: 30 }, (_, i): Raw => {
+  const date = new Date(Date.UTC(2026, 9, 26 - i)).toISOString().slice(0, 10);
+  return {
+    id: `day-${date}`,
+    title: date,
+    blocks: [
+      b(`${date}-p`, `type:: journal\ndate:: ${date}`),
+      b(`${date}-1`, i % 3 === 0 ? "Worked on [[Quiddity]]." : "A quiet day."),
+      ...(i % 5 === 0 ? [b(`${date}-2`, "Read about loro again")] : []),
+    ],
+  };
+});
+
+const entities: Raw[] = [
+  ...days,
   {
     id: "all",
     title: "All entities",
@@ -21,7 +40,7 @@ const entities: Omit<Entity, "links">[] = [
     id: "quiddity",
     title: "Quiddity",
     blocks: [
-      b("q1", "type:: project"),
+      b("q1", "favourite:: true\ntype:: project"),
       b(
         "q2",
         "Local-first, multiplayer second brain.",
@@ -44,7 +63,10 @@ const entities: Omit<Entity, "links">[] = [
   {
     id: "reading",
     title: "Reading list",
-    blocks: [b("r1", "Designing Data-Intensive Applications")],
+    blocks: [
+      b("r1", "Designing Data-Intensive Applications"),
+      b("r2", "Notes on loro and other CRDTs"),
+    ],
   },
   {
     id: "slow",
@@ -53,6 +75,14 @@ const entities: Omit<Entity, "links">[] = [
   },
   // "broken" is deliberately absent: opening it exercises the error boundary.
 ];
+
+export const slowIds = new Set(["slow"]);
+
+const byId = new Map(entities.map((e) => [e.id, e]));
+const ref = (id: EntityId): EntityRef => {
+  const e = byId.get(id);
+  return e ? { id: e.id, title: e.title } : { id, title: id };
+};
 
 /** `[[Name]]` resolves by lowercased name, as the fixtures' ids are. */
 function linksIn(blocks: Block[], links: Record<string, LinkTarget> = {}) {
@@ -67,18 +97,50 @@ function linksIn(blocks: Block[], links: Record<string, LinkTarget> = {}) {
   return links;
 }
 
-export const slowIds = new Set(["slow"]);
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const byId = new Map(entities.map((e) => [e.id, e]));
-const ref = (id: EntityId): EntityRef => {
-  const e = byId.get(id);
-  return e ? { id: e.id, title: e.title } : { id, title: id };
-};
+/** The blocks (outermost first) of other entities that match, grouped. */
+function find(target: EntityId, matches: (text: string) => boolean): Reference[] {
+  const groups: Reference[] = [];
+  for (const e of entities) {
+    if (e.id === target) continue;
+    const found: Block[] = [];
+    const walk = (blocks: Block[]) => {
+      for (const block of blocks) {
+        if (matches(block.text)) found.push(block);
+        else walk(block.children);
+      }
+    };
+    walk(e.blocks);
+    if (found.length) {
+      groups.push({ source: ref(e.id), blocks: found, links: linksIn(found) });
+    }
+  }
+  // Recent days first, then everything else by name, as the core does.
+  const journal = (r: Reference) => r.source.id.startsWith("day-");
+  return groups.sort(
+    (a, b) =>
+      Number(journal(b)) - Number(journal(a)) ||
+      (journal(a) ? b.source.title.localeCompare(a.source.title) : a.source.title.localeCompare(b.source.title)),
+  );
+}
 
 const delay = <T>(value: T, ms: number) =>
   new Promise<T>((resolve) => setTimeout(() => resolve(value), ms));
 
-const cache = new Map<EntityId, Promise<Entity>>();
+const once = <T>(f: () => Promise<T>): (() => Promise<T>) => {
+  let p: Promise<T> | undefined;
+  return () => (p ??= f());
+};
+
+const cached = <T>(f: (id: EntityId) => Promise<T>) => {
+  const cache = new Map<EntityId, Promise<T>>();
+  return (id: EntityId) => {
+    let p = cache.get(id);
+    if (!p) cache.set(id, (p = f(id)));
+    return p;
+  };
+};
 
 export const fixtureStore: Store = {
   favourites: once(() =>
@@ -90,22 +152,26 @@ export const fixtureStore: Store = {
       100,
     ),
   ),
-  today: once(() => delay(ref("journals"), 100)),
-  entity(id) {
-    let p = cache.get(id);
-    if (!p) {
+  journals: once(() => delay(days.map((d) => ref(d.id)), 100)),
+  entity: cached((id) =>
+    delay(null, slowIds.has(id) ? 3000 : 80).then(() => {
       const e = byId.get(id);
-      p = delay(null, slowIds.has(id) ? 3000 : 80).then(() => {
-        if (!e) throw new Error(`No entity ${id}`);
-        return { ...e, links: linksIn(e.blocks) };
-      });
-      cache.set(id, p);
-    }
-    return p;
-  },
+      if (!e) throw new Error(`No entity ${id}`);
+      return { ...e, links: linksIn(e.blocks) };
+    }),
+  ),
+  references: cached((id) => {
+    const title = ref(id).title.toLowerCase();
+    return delay(
+      find(id, (t) => t.toLowerCase().includes(`[[${title}]]`)),
+      120,
+    );
+  }),
+  unlinkedReferences: cached((id) => {
+    const word = new RegExp(`(?<![\\w])${escape(ref(id).title)}(?![\\w])`, "i");
+    return delay(
+      find(id, (t) => word.test(t.replace(/\[\[[^\]]*\]\]/g, " ")) && !/^\w+::/.test(t)),
+      120,
+    );
+  }),
 };
-
-function once<T>(f: () => Promise<T>): () => Promise<T> {
-  let p: Promise<T> | undefined;
-  return () => (p ??= f());
-}

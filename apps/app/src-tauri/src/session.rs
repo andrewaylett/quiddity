@@ -4,13 +4,13 @@
 //! exposes it as commands. The types here are the wire format and mirror
 //! `apps/ui/lib/model.ts`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use jiff::Zoned;
 use quiddity_core::schema::{Typed, coerce};
-use quiddity_core::syntax::{format_link, parse_block};
-use quiddity_core::{BlockId, Graph, Index, Resolution, ensure_journal};
+use quiddity_core::syntax::{Value, format_link, is_properties_block, parse_block};
+use quiddity_core::{BlockId, Graph, Identity, Index, Resolution, ensure_journal};
 use quiddity_node::store::Store;
 use serde::Serialize;
 
@@ -66,6 +66,17 @@ pub struct Entity {
     /// brackets as the syntax crate writes it. Until the UI parses text
     /// itself (the syntax crate compiled to WASM), links written some other
     /// way are not found here and render as unresolved.
+    pub links: BTreeMap<String, LinkTarget>,
+}
+
+/// The blocks of one entity that mention another.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Reference {
+    pub source: EntityRef,
+    /// Each with its children, for context.
+    pub blocks: Vec<Block>,
+    /// As [`Entity::links`], for the links in these blocks.
     pub links: BTreeMap<String, LinkTarget>,
 }
 
@@ -143,19 +154,28 @@ impl Session {
         Ok(favourites)
     }
 
-    /// Today's journal page, created (and saved) if there isn't one.
-    pub fn today(&mut self) -> Result<EntityRef> {
-        let date = Zoned::now().date();
-        let id = match self.index.journal(date) {
-            Some(id) => id,
-            None => {
-                let id = ensure_journal(&self.graph, &self.index, date)?;
-                self.store.save(&self.graph)?;
-                self.index = Index::build(&self.graph)?;
-                id
-            }
-        };
-        self.entity_ref(self.index.canonical(id))
+    /// Journal pages from today back, newest first. Today's is created (and
+    /// saved) if there isn't one.
+    pub fn journals(&mut self) -> Result<Vec<EntityRef>> {
+        let today = Zoned::now().date();
+        if self.index.journal(today).is_none() {
+            ensure_journal(&self.graph, &self.index, today)?;
+            self.store.save(&self.graph)?;
+            self.index = Index::build(&self.graph)?;
+        }
+        let mut days: Vec<_> = self
+            .index
+            .entities()
+            .filter(|e| self.index.canonical(e.id) == e.id)
+            .filter_map(|e| match e.identity() {
+                Some(Identity::Journal(date)) if date <= today => Some((date, e.id)),
+                _ => None,
+            })
+            .collect();
+        days.sort_by(|a, b| b.cmp(a));
+        days.into_iter()
+            .map(|(_, id)| self.entity_ref(id))
+            .collect()
     }
 
     pub fn entity(&self, id: &str) -> Result<Entity> {
@@ -173,6 +193,113 @@ impl Session {
             blocks,
             links,
         })
+    }
+
+    /// Blocks that link to the entity, by the entity they are in.
+    pub fn references(&self, id: &str) -> Result<Vec<Reference>> {
+        let target = self.id(id)?;
+        let sources = self
+            .index
+            .backlinks(target)
+            .iter()
+            .map(|b| b.source)
+            .collect();
+        self.grouped(target, sources)
+    }
+
+    /// Blocks that mention the entity's name or an alias in plain text,
+    /// without linking to it.
+    pub fn unlinked_references(&self, id: &str) -> Result<Vec<Reference>> {
+        let target = self.id(id)?;
+        let Some(info) = self.index.entity(target) else {
+            return Ok(Vec::new());
+        };
+        if matches!(info.identity(), Some(Identity::Journal(_))) {
+            return Ok(Vec::new());
+        }
+        let names: Vec<String> = std::iter::once(info.name.clone())
+            .chain(
+                info.values("alias")
+                    .flat_map(|v| match v {
+                        Value::List(items) => items.iter().collect(),
+                        v => vec![v],
+                    })
+                    .filter_map(|v| match v {
+                        Value::Text(s) => Some(s.clone()),
+                        Value::Link(link) => Some(link.name.clone()),
+                        _ => None,
+                    }),
+            )
+            .map(|n| n.trim().to_lowercase())
+            .filter(|n| !n.is_empty())
+            .collect();
+        let linked: BTreeSet<_> = self
+            .index
+            .backlinks(target)
+            .iter()
+            .map(|b| b.source)
+            .collect();
+        let mut found = BTreeSet::new();
+        for block in self.graph.blocks() {
+            // Entity names aren't prose, and property values are structured.
+            if self.graph.parent(block).is_none() || linked.contains(&block) {
+                continue;
+            }
+            let text = self.graph.text(block)?;
+            if is_properties_block(&text) {
+                continue;
+            }
+            let prose = without_links(&text).to_lowercase();
+            if names.iter().any(|n| contains_word(&prose, n)) {
+                found.insert(block);
+            }
+        }
+        self.grouped(target, found)
+    }
+
+    /// Groups blocks by entity, leaving out the target's own and any block
+    /// already shown inside another.
+    fn grouped(&self, target: BlockId, blocks: BTreeSet<BlockId>) -> Result<Vec<Reference>> {
+        let mut by_entity: BTreeMap<BlockId, Vec<BlockId>> = BTreeMap::new();
+        for &block in &blocks {
+            let entity = self.index.canonical(self.graph.entity_of(block));
+            let nested = std::iter::successors(self.graph.parent(block), |&p| self.graph.parent(p))
+                .any(|ancestor| blocks.contains(&ancestor));
+            if entity != target && block != self.graph.entity_of(block) && !nested {
+                by_entity.entry(entity).or_default().push(block);
+            }
+        }
+        let mut groups = Vec::new();
+        for (entity, blocks) in by_entity {
+            let mut links = BTreeMap::new();
+            let blocks = blocks
+                .into_iter()
+                .map(|b| self.block(b, &mut links))
+                .collect::<Result<_>>()?;
+            let date = match self.index.entity(entity).and_then(|e| e.identity()) {
+                Some(Identity::Journal(date)) => Some(date),
+                _ => None,
+            };
+            let source = self.entity_ref(entity)?;
+            groups.push((
+                date,
+                Reference {
+                    source,
+                    blocks,
+                    links,
+                },
+            ));
+        }
+        // Recent days first, then everything else by name.
+        groups.sort_by_cached_key(|(date, g)| {
+            (
+                date.is_none(),
+                std::cmp::Reverse(*date),
+                g.source.title.to_lowercase(),
+                g.source.id.clone(),
+            )
+        });
+        Ok(groups.into_iter().map(|(_, g)| g).collect())
     }
 
     fn block(&self, id: BlockId, links: &mut BTreeMap<String, LinkTarget>) -> Result<Block> {
@@ -209,10 +336,46 @@ impl Session {
     }
 }
 
+/// `text` with `[[links]]` and `((block refs))` blanked out, so a name inside
+/// one doesn't count as a plain mention.
+fn without_links(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        let skipped = ["[[", "(("].iter().find_map(|open| {
+            let close = if *open == "[[" { "]]" } else { "))" };
+            let inner = rest.strip_prefix(open)?;
+            inner.find(close).map(|end| &inner[end + 2..])
+        });
+        match skipped {
+            Some(after) => {
+                out.push(' ');
+                rest = after;
+            }
+            None => {
+                let c = rest.chars().next().expect("rest is not empty");
+                out.push(c);
+                rest = &rest[c.len_utf8()..];
+            }
+        }
+    }
+    out
+}
+
+/// Whether `name` occurs in `text` as whole words.
+fn contains_word(text: &str, name: &str) -> bool {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    text.match_indices(name).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + name.len()..].chars().next();
+        !before.is_some_and(word) && !after.is_some_and(word)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use quiddity_core::syntax::Value;
+    use quiddity_core::syntax::Link;
 
     fn text(s: &str) -> Option<Value> {
         Some(Value::Text(s.to_owned()))
@@ -305,13 +468,150 @@ mod tests {
         assert!(s.entity("nonsense").is_err());
     }
 
+    /// A session on a graph that `build` has filled.
+    fn open_with(build: impl FnOnce(&Graph)) -> (tempfile::TempDir, Session) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let graph = store.init(false).unwrap();
+        build(&graph);
+        graph.commit();
+        store.save(&graph).unwrap();
+        let session = Session::open(dir.path()).unwrap();
+        (dir, session)
+    }
+
+    fn note(graph: &Graph, entity: BlockId, text: &str) -> BlockId {
+        graph.create_block(Some(entity), None, text).unwrap()
+    }
+
+    fn id_of(s: &Session, title: &str) -> String {
+        s.entities()
+            .unwrap()
+            .into_iter()
+            .find(|e| e.title == title)
+            .unwrap()
+            .id
+    }
+
+    fn titles(refs: &[Reference]) -> Vec<&str> {
+        refs.iter().map(|r| r.source.title.as_str()).collect()
+    }
+
     #[test]
-    fn today_is_created_once_and_saved() {
+    fn journals_run_newest_first_from_today_and_are_saved() {
+        use jiff::ToSpan;
+        let today = Zoned::now().date();
+        let day = |d: jiff::civil::Date| d.to_string();
+        let (dir, mut s) = open_with(|g| {
+            let index = Index::build(g).unwrap();
+            for date in [
+                today.checked_sub(5.days()).unwrap(),
+                today.checked_sub(1.day()).unwrap(),
+                today.checked_add(1.day()).unwrap(),
+            ] {
+                ensure_journal(g, &index, date).unwrap();
+            }
+            g.create_entity("Not a journal", &[]).unwrap();
+        });
+        let titles = |s: &mut Session| -> Vec<String> {
+            s.journals().unwrap().into_iter().map(|e| e.title).collect()
+        };
+        let expected = [
+            day(today),
+            day(today.checked_sub(1.day()).unwrap()),
+            day(today.checked_sub(5.days()).unwrap()),
+        ];
+        assert_eq!(titles(&mut s), expected, "today created, tomorrow left out");
+        assert_eq!(titles(&mut s), expected, "and created only once");
+        let mut reopened = Session::open(dir.path()).unwrap();
+        assert_eq!(titles(&mut reopened), expected, "and saved");
+    }
+
+    #[test]
+    fn references_are_grouped_by_entity_without_nesting_or_self_links() {
+        let (_dir, s) = open_with(|g| {
+            let alpha = g.create_entity("Alpha", &[]).unwrap();
+            note(g, alpha, "talking to myself, [[Alpha]]");
+            let beta = g.create_entity("Beta", &[]).unwrap();
+            let outer = note(g, beta, "see [[Alpha]]");
+            note(g, outer, "and again [[Alpha]]");
+            note(g, beta, "unrelated");
+            let to_alpha = Value::Link(Link {
+                name: "Alpha".into(),
+                qualifiers: Vec::new(),
+            });
+            let gamma = g
+                .create_entity("Gamma", &[("type", Some(to_alpha))])
+                .unwrap();
+            note(g, gamma, "[[Alpha]] too, and [[Nope]]");
+        });
+        let refs = s.references(&id_of(&s, "Alpha")).unwrap();
+        assert_eq!(titles(&refs), ["Beta", "Gamma"]);
+        let beta = &refs[0];
+        assert_eq!(
+            beta.blocks.len(),
+            1,
+            "the inner block is shown inside the outer"
+        );
+        assert_eq!(beta.blocks[0].text, "see [[Alpha]]");
+        assert_eq!(beta.blocks[0].children[0].text, "and again [[Alpha]]");
+        let gamma = &refs[1];
+        assert_eq!(gamma.blocks.len(), 2, "its property and its note");
+        assert_eq!(gamma.links["Nope"], LinkTarget::Missing);
+        assert!(matches!(gamma.links["Alpha"], LinkTarget::Entity { .. }));
+    }
+
+    #[test]
+    fn unlinked_references_are_whole_word_prose_mentions() {
+        let (_dir, s) = open_with(|g| {
+            g.create_entity("Alpha", &[("alias", text("Omega"))])
+                .unwrap();
+            let beta = g.create_entity("Beta", &[]).unwrap();
+            note(g, beta, "alpha is mentioned");
+            note(g, beta, "Alphabet soup");
+            note(g, beta, "[[Alpha]] is linked");
+            note(g, beta, "[[Alpha Centauri]] is somewhere else");
+            note(g, beta, "alias: ((alpha)) is a reference");
+            let gamma = g
+                .create_entity("Gamma", &[("type", text("alpha"))])
+                .unwrap();
+            note(g, gamma, "ALPHA, again!");
+            let delta = g.create_entity("Delta", &[]).unwrap();
+            note(g, delta, "omega here, via an alias");
+            g.create_entity("Alpha beta", &[]).unwrap();
+        });
+        let refs = s.unlinked_references(&id_of(&s, "Alpha")).unwrap();
+        assert_eq!(titles(&refs), ["Beta", "Delta", "Gamma"]);
+        let text = |r: &Reference| r.blocks.iter().map(|b| b.text.clone()).collect::<Vec<_>>();
+        assert_eq!(text(&refs[0]), ["alpha is mentioned"]);
+        assert_eq!(text(&refs[1]), ["omega here, via an alias"]);
+        assert_eq!(text(&refs[2]), ["ALPHA, again!"], "not the type:: property");
+    }
+
+    #[test]
+    fn references_list_journals_first_and_newest_first() {
+        use jiff::ToSpan;
+        let today = Zoned::now().date();
+        let (_dir, s) = open_with(|g| {
+            let index = Index::build(g).unwrap();
+            g.create_entity("Alpha", &[]).unwrap();
+            let zed = g.create_entity("Zed", &[]).unwrap();
+            note(g, zed, "[[Alpha]]");
+            for days in [3, 1, 2] {
+                let day = ensure_journal(g, &index, today.checked_sub(days.days()).unwrap());
+                note(g, day.unwrap(), "[[Alpha]]");
+            }
+        });
+        let refs = s.references(&id_of(&s, "Alpha")).unwrap();
+        let day = |n: i64| today.checked_sub(n.days()).unwrap().to_string();
+        assert_eq!(titles(&refs), [day(1), day(2), day(3), "Zed".to_owned()]);
+    }
+
+    #[test]
+    fn journals_have_no_unlinked_references() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = Session::open(dir.path()).unwrap();
-        let first = s.today().unwrap();
-        assert_eq!(s.today().unwrap(), first);
-        let reopened = Session::open(dir.path()).unwrap();
-        assert_eq!(reopened.entities().unwrap(), [first]);
+        let today = s.journals().unwrap().remove(0);
+        assert!(s.unlinked_references(&today.id).unwrap().is_empty());
     }
 }
