@@ -5,3 +5,5 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 5931c62af2fb29a6ae685d747a253f1574db6f60bf7fe64145071b21436b0dd9 # shrinks to steps = [Edit { device: 2, parent: Index(0), text: 0 }, Edit { device: 0, parent: Index(0), text: 0 }]
+cc a791f0695a13577f6f802c4a31ad9c803e209387d4f444a338f9d5736b7904c8 # shrinks to steps = [Edit { device: 0, parent: Index(0), text: 0 }, Store(0), Compact(0), Disconnect(Index(174640)), Connect(0, 2)]
+cc 01a3b3bd7d494a69628d29ff8ba0ca3f729f6f1d6d30222424a05f3ad23fc5f6 # shrinks to steps = [Store(0), Compact(0), Connect(0, 2), Deliver { connection: Index(0), to: 1 }, Deliver { connection: Index(0), to: 0 }, Deliver { connection: Index(999603201), to: 1 }, Disconnect(Index(8256033119896777975)), Edit { device: 0, parent: Index(2675765744709947884), text: 239 }]

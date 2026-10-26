@@ -57,9 +57,9 @@ fn edit(peer: &Peer, text: &str) {
 
 #[tokio::test]
 async fn two_devices_sync_and_stay_in_sync() {
-    let laptop = Peer::new(Graph::new(), Allowed::Any);
+    let laptop = Peer::new(Graph::new(), Allowed::Any, "laptop");
     edit(&laptop, "before connecting");
-    let phone = Peer::new(Graph::blank(), Allowed::Any);
+    let phone = Peer::new(Graph::blank(), Allowed::Any, "phone");
 
     let (laptop_router, laptop_addr) = listen(&laptop).await;
     let (phone_router, _) = listen(&phone).await;
@@ -82,9 +82,9 @@ async fn two_devices_sync_and_stay_in_sync() {
 
 #[tokio::test]
 async fn devices_that_never_meet_sync_through_a_node() {
-    let node = Peer::new(Graph::new(), Allowed::Any);
-    let phone = Peer::new(Graph::blank(), Allowed::Any);
-    let laptop = Peer::new(Graph::blank(), Allowed::Any);
+    let node = Peer::new(Graph::new(), Allowed::Any, "node");
+    let phone = Peer::new(Graph::blank(), Allowed::Any, "phone");
+    let laptop = Peer::new(Graph::blank(), Allowed::Any, "laptop");
     let (node_router, node_addr) = listen(&node).await;
     let (phone_router, _) = listen(&phone).await;
     let (laptop_router, _) = listen(&laptop).await;
@@ -114,10 +114,10 @@ async fn devices_that_never_meet_sync_through_a_node() {
 #[tokio::test]
 async fn merges_reach_connected_devices() {
     let date = "2026-10-26".parse().unwrap();
-    let node = Peer::new(Graph::new(), Allowed::Any);
+    let node = Peer::new(Graph::new(), Allowed::Any, "node");
     let devices = [
-        Peer::new(Graph::blank(), Allowed::Any),
-        Peer::new(Graph::blank(), Allowed::Any),
+        Peer::new(Graph::blank(), Allowed::Any, "device-0"),
+        Peer::new(Graph::blank(), Allowed::Any, "device-1"),
     ];
     for (i, device) in devices.iter().enumerate() {
         let graph = device.graph();
@@ -161,10 +161,10 @@ async fn merges_reach_connected_devices() {
 
 #[tokio::test]
 async fn unlisted_devices_are_refused() {
-    let node = Peer::new(Graph::new(), Allowed::Only(HashSet::new()));
+    let node = Peer::new(Graph::new(), Allowed::Only(HashSet::new()), "node");
     edit(&node, "private");
     let (node_router, node_addr) = listen(&node).await;
-    let stranger = Peer::new(Graph::blank(), Allowed::Any);
+    let stranger = Peer::new(Graph::blank(), Allowed::Any, "stranger");
     let (stranger_router, _) = listen(&stranger).await;
 
     let result = stranger

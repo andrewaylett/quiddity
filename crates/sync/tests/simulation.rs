@@ -6,11 +6,16 @@
 //! Devices batch their outgoing updates, as an app would, so flushing is a
 //! step of its own rather than following every change.
 //!
+//! Devices record what they have stored and compact by the device list,
+//! as they would on saving, so sessions meet compacted peers. No session
+//! may ever find either side behind the other's history.
+//!
 //! The run ends with the devices connected only in a chain, so that
 //! everything has to be relayed through the middle ones.
 
 use std::collections::VecDeque;
 
+use jiff::{SignedDuration, Timestamp};
 use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -18,6 +23,16 @@ use quiddity_core::{BlockId, Graph};
 use quiddity_sync::{FrameReader, Message, Session, State, write_frame};
 
 const DEVICES: usize = 3;
+const ACTIVE: SignedDuration = SignedDuration::from_hours(24 * 30);
+
+fn now() -> Timestamp {
+    "2026-10-26T12:00:00Z".parse().unwrap()
+}
+
+/// A device that has yet to join: it has nothing to edit or store.
+fn blank(graph: &Graph) -> bool {
+    graph.version() == quiddity_core::Version::default()
+}
 
 /// One direction of a connection: framed bytes in flight.
 #[derive(Debug, Default)]
@@ -49,6 +64,7 @@ struct Network {
 impl Network {
     fn new() -> Self {
         let origin = Graph::new();
+        origin.record_stored("0", now()).unwrap();
         let mut devices = vec![origin];
         devices.extend((1..DEVICES).map(|_| Graph::blank()));
         Self {
@@ -68,11 +84,12 @@ impl Network {
         }
         let mut connection = Connection {
             ends: [a, b],
-            sessions: [Session::new(), Session::new()],
+            sessions: [Session::new(a.to_string()), Session::new(b.to_string())],
             pipes: [Pipe::default(), Pipe::default()],
         };
-        connection.pipes[1].send(&Session::hello(&self.devices[a]));
-        connection.pipes[0].send(&Session::hello(&self.devices[b]));
+        let hellos = [0, 1].map(|i| connection.sessions[i].hello(&self.devices[[a, b][i]]));
+        connection.pipes[1].send(&hellos[0]);
+        connection.pipes[0].send(&hellos[1]);
         self.connections.push(connection);
     }
 
@@ -102,8 +119,13 @@ impl Network {
         let message = Message::decode(&frame).unwrap();
         let device = c.ends[to];
         let replies = c.sessions[to]
-            .receive(&self.devices[device], message)
+            .receive(&self.devices[device], message, now())
             .unwrap();
+        let state = c.sessions[to].state();
+        assert!(
+            !matches!(state, State::Behind | State::PeerBehind),
+            "device {device} is {state:?}"
+        );
         for reply in &replies {
             c.pipes[1 - to].send(reply);
         }
@@ -155,6 +177,10 @@ enum Step {
     },
     /// Send a device's batched updates.
     Flush(usize),
+    /// The device records that it has stored what it has.
+    Store(usize),
+    /// The device drops history, if its compaction point says it can.
+    Compact(usize),
 }
 
 fn step() -> impl Strategy<Value = Step> {
@@ -165,6 +191,8 @@ fn step() -> impl Strategy<Value = Step> {
         1 => any::<Index>().prop_map(Step::Disconnect),
         6 => (any::<Index>(), 0..2usize).prop_map(|(connection, to)| Step::Deliver { connection, to }),
         2 => (0..DEVICES).prop_map(Step::Flush),
+        1 => (0..DEVICES).prop_map(Step::Store),
+        1 => (0..DEVICES).prop_map(Step::Compact),
     ]
 }
 
@@ -187,7 +215,19 @@ proptest! {
     fn devices_converge_through_relays(steps in vec(step(), 1..80)) {
         let mut net = Network::new();
         for step in &steps {
+            if let Step::Edit { device, .. } | Step::Rewrite { device, .. } | Step::Store(device) | Step::Compact(device) = *step
+                && blank(&net.devices[device])
+            {
+                continue;
+            }
             match *step {
+                Step::Store(device) => net.devices[device].record_stored(&device.to_string(), now()).unwrap(),
+                Step::Compact(device) => {
+                    let graph = &net.devices[device];
+                    if let Some(at) = graph.compaction_point(now(), ACTIVE) {
+                        net.devices[device] = Graph::from_snapshot(&graph.shallow_snapshot(&at).unwrap()).unwrap();
+                    }
+                }
                 Step::Edit { device, parent, text } => {
                     let graph = &net.devices[device];
                     let blocks = graph.blocks();

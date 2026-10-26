@@ -3137,6 +3137,7 @@ dependencies = [
 name = "quiddity-sync"
 version = "0.1.0"
 dependencies = [
+ "jiff",
  "proptest",
  "quiddity-core",
  "thiserror 2.0.21",

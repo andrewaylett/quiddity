@@ -4,9 +4,13 @@
 //! practice) each run a [`Session`]:
 //!
 //! 1. On connecting, each side sends [`Message::Hello`] with its schema
-//!    version and its graph's version.
-//! 2. On receiving a hello, a side checks the schema is one it can read,
-//!    then sends whatever the other side is missing.
+//!    version, its device ID, where its history starts and its graph's
+//!    version.
+//! 2. On receiving a hello, a side checks the schema is one it can read and
+//!    that neither side is behind where the other's history starts. It
+//!    vouches for a peer it hasn't heard of, then sends whatever the other
+//!    side is missing: updates, or a snapshot for a blank peer that its
+//!    compacted history can't bring up to date.
 //! 3. From then on, whenever its graph changes (by local edits, or by
 //!    updates from another peer), a side calls [`Session::flush`] to send
 //!    the new updates.

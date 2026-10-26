@@ -321,10 +321,14 @@ Implemented in `crates/sync` (independent of transport) and `crates/node`
 (over iroh):
 
 1. On connecting, each side sends a **hello**: its graph's schema version
-   (none, for a blank replica) and its Loro version vector.
+   (none, for a blank replica), its device ID, where its history starts,
+   and its Loro version vector.
 2. A side that can't read the other's schema stops there, so a device that
-   is behind never imports data it doesn't understand. Otherwise it sends
-   the updates the other is missing.
+   is behind never imports data it doesn't understand. So does a side
+   behind where the other's history starts (below). Otherwise it vouches
+   for the other if it hasn't heard of it, and sends the updates the other
+   is missing, or a snapshot to a blank peer it can't bring up to date with
+   updates.
 3. From then on, each side sends new updates whenever its graph changes,
    whether by local edits or by updates from another peer. So live editing
    syncs character by character, and a device in the middle relays. Each

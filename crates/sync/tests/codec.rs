@@ -3,30 +3,42 @@
 
 use proptest::collection::vec;
 use proptest::prelude::*;
-use quiddity_core::Graph;
+use quiddity_core::{Graph, Version};
 use quiddity_sync::{FrameError, FrameReader, MAX_FRAME, Message, write_frame};
 
-/// A message with a real version: from a graph that has seen edits from
-/// several peers.
+/// A real version: from a graph that has seen edits from several peers.
+fn version() -> impl Strategy<Value = Version> {
+    vec(0..4usize, 0..6).prop_map(|edits| {
+        let graph = Graph::blank();
+        for peer_edits in edits {
+            let other = Graph::blank();
+            for _ in 0..peer_edits {
+                other.create_block(None, None, "x").unwrap();
+            }
+            graph
+                .import(&other.updates_since(&graph.version()).unwrap())
+                .unwrap();
+        }
+        graph.version()
+    })
+}
+
 fn message() -> impl Strategy<Value = Message> {
     prop_oneof![
-        (proptest::option::of(any::<i64>()), vec(0..4usize, 0..6)).prop_map(|(schema, edits)| {
-            let graph = Graph::blank();
-            for peer_edits in edits {
-                let other = Graph::blank();
-                for _ in 0..peer_edits {
-                    other.create_block(None, None, "x").unwrap();
-                }
-                graph
-                    .import(&other.updates_since(&graph.version()).unwrap())
-                    .unwrap();
-            }
-            Message::Hello {
+        (
+            proptest::option::of(any::<i64>()),
+            any::<String>(),
+            version(),
+            version()
+        )
+            .prop_map(|(schema, device, start, version)| Message::Hello {
                 schema,
-                version: graph.version(),
-            }
-        }),
+                device,
+                start,
+                version,
+            }),
         vec(any::<u8>(), 0..64).prop_map(Message::Updates),
+        vec(any::<u8>(), 0..64).prop_map(Message::Snapshot),
     ]
 }
 

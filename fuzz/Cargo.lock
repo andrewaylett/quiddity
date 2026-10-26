@@ -1062,6 +1062,7 @@ dependencies = [
 name = "quiddity-fuzz"
 version = "0.0.0"
 dependencies = [
+ "jiff",
  "libfuzzer-sys",
  "quiddity-core",
  "quiddity-sync",
@@ -1072,6 +1073,7 @@ dependencies = [
 name = "quiddity-sync"
 version = "0.1.0"
 dependencies = [
+ "jiff",
  "quiddity-core",
  "thiserror 2.0.21",
 ]
