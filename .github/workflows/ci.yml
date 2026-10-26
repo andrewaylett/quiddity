@@ -16,85 +16,83 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all --check
-      - run: cargo clippy --all-targets --locked
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
-      - run: cargo nextest run --locked --profile ci
-      - run: cargo test --doc --locked
-      - run: cargo doc --no-deps --locked
-        env:
-          RUSTDOCFLAGS: -D warnings
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo fmt --all --check
+    - run: cargo clippy --all-targets --locked
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest
+    - run: cargo nextest run --locked --profile ci
+    - run: cargo test --doc --locked
+    - run: cargo doc --no-deps --locked
+      env:
+        RUSTDOCFLAGS: -D warnings
 
   ui:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm ui typecheck
-      - run: pnpm ui build
+    - uses: actions/checkout@v4
+    - uses: pnpm/action-setup@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: pnpm
+    - run: pnpm install --frozen-lockfile
+    - run: pnpm ui typecheck
+    - run: pnpm ui build
 
   app:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: >-
-          sudo apt-get update && sudo apt-get install -y
-          libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
-          libayatana-appindicator3-dev
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/app/src-tauri
-      - run: pnpm install --frozen-lockfile
-      # The shell embeds the built UI.
-      - run: pnpm ui build
-      - working-directory: apps/app/src-tauri
-        run: |
-          cargo fmt --check
-          cargo clippy --all-targets --locked
-          cargo test --locked
+    - uses: actions/checkout@v4
+    - run: >-
+        sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
+    - uses: pnpm/action-setup@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: pnpm
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: apps/app/src-tauri
+    - run: pnpm install --frozen-lockfile
+    # The shell embeds the built UI.
+    - run: pnpm ui build
+    - working-directory: apps/app/src-tauri
+      run: |
+        cargo fmt --check
+        cargo clippy --all-targets --locked
+        cargo test --locked
 
   mutants:
     # Every mutant in the lines a PR changes must be caught by some test.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest,cargo-mutants
-      - run: git diff origin/${{ github.base_ref }}... > pr.diff
-      - run: cargo mutants --in-diff pr.diff --no-shuffle -j 2 --timeout-multiplier 3
-        env:
-          PROPTEST_CASES: 64
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mutants
-          path: mutants.out/
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest,cargo-mutants
+    - run: git diff origin/${{ github.base_ref }}... > pr.diff
+    - run: cargo mutants --in-diff pr.diff --no-shuffle -j 2 --timeout-multiplier 3
+      env:
+        PROPTEST_CASES: 64
+    - if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: mutants
+        path: mutants.out/
 
   fuzz:
     runs-on: ubuntu-latest
@@ -103,22 +101,20 @@ jobs:
       matrix:
         target: [block, outline, peer]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: fuzz
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-fuzz
-      # The prebuilt cargo-fuzz otherwise targets musl, which isn't installed.
-      - run: mkdir -p fuzz/corpus/${{ matrix.target }}
-      - run: >-
-          cargo fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }}
-          fuzz/corpus/${{ matrix.target }} fuzz/seeds/${{ matrix.target }}
-          -- -max_total_time=60
-      - if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuzz-${{ matrix.target }}
-          path: fuzz/artifacts/
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@nightly
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: fuzz
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-fuzz
+    # The prebuilt cargo-fuzz otherwise targets musl, which isn't installed.
+    - run: mkdir -p fuzz/corpus/${{ matrix.target }}
+    - run: >-
+        cargo fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} fuzz/corpus/${{ matrix.target }} fuzz/seeds/${{ matrix.target }} -- -max_total_time=60
+    - if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: fuzz-${{ matrix.target }}
+        path: fuzz/artifacts/

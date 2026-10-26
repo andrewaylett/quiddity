@@ -1,3 +1,4 @@
+exclude: ^(fuzz/seeds/|pnpm-lock\.yaml$)
 repos:
 - repo: https://github.com/andrewaylett/pre-commit-hooks
   rev: v0.9.0
@@ -19,7 +20,7 @@ repos:
     args: [--fix=lf]
   - id: check-added-large-files
   - id: pretty-format-json
-    args: [--autofix, --indent, "2"]
+    args: [--autofix, --indent, "2", --no-sort-keys]
   - id: check-xml
 - repo: https://github.com/google/yamlfmt
   rev: v0.21.0
