@@ -36,6 +36,16 @@ proptest! {
         prop_assert_eq!(Message::decode(&message.encode()), Ok(message));
     }
 
+    /// A message cut short is refused (or, for updates, is shorter
+    /// updates), never misread or a panic.
+    #[test]
+    fn truncated_messages_are_not_misread(message in message()) {
+        let bytes = message.encode();
+        for len in 0..bytes.len() {
+            prop_assert_ne!(Message::decode(&bytes[..len]), Ok(message.clone()));
+        }
+    }
+
     #[test]
     fn frames_survive_any_split(payloads in vec(vec(any::<u8>(), 0..40), 0..6), cuts in vec(any::<prop::sample::Index>(), 0..8)) {
         let mut stream = Vec::new();
@@ -61,10 +71,20 @@ proptest! {
 
 #[test]
 fn oversized_frames_are_refused_before_buffering() {
+    let header = |len: usize| u32::try_from(len).unwrap().to_le_bytes();
     let mut reader = FrameReader::new();
-    reader.push(&u32::try_from(MAX_FRAME + 1).unwrap().to_le_bytes());
+    reader.push(&header(MAX_FRAME + 1));
     assert_eq!(
         reader.next_frame(),
         Err(FrameError::TooLarge(MAX_FRAME + 1))
     );
+
+    // A whole graph's history goes in one frame on first sync, so the limit
+    // is generous: a frame of exactly the limit waits for its bytes, and
+    // the limit is well over a hundred megabytes.
+    for len in [MAX_FRAME, 200 << 20] {
+        let mut reader = FrameReader::new();
+        reader.push(&header(len));
+        assert_eq!(reader.next_frame(), Ok(None), "{len}");
+    }
 }
