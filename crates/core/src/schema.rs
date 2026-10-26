@@ -66,6 +66,7 @@ impl PropertySchema {
             "type" => Self::new(Ref, Scalar, Many),
             "alias" => Self::new(Text, Scalar, Many),
             "date" => Self::new(Date, Scalar, One),
+            "favourite" => Self::new(Boolean, Scalar, One),
             "id" | "title" | "value-type" | "form" | "cardinality" => Self::new(Text, Scalar, One),
             _ => return None,
         })
@@ -255,5 +256,6 @@ mod tests {
 
         let flag = PropertySchema::new(ValueType::Boolean, Form::Scalar, Cardinality::One);
         assert_eq!(coerce(&t("Yes"), &flag), Ok(Typed::Boolean(true)));
+        assert_eq!(PropertySchema::builtin("Favourite"), Some(flag));
     }
 }

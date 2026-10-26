@@ -1,4 +1,4 @@
-import type { Block, Entity, EntityId, EntityRef, Store } from "./model";
+import type { Block, Entity, EntityId, EntityRef, LinkTarget, Store } from "./model";
 
 const b = (id: string, text: string, ...children: Block[]): Block => ({
   id,
@@ -6,7 +6,7 @@ const b = (id: string, text: string, ...children: Block[]): Block => ({
   children,
 });
 
-const entities: Entity[] = [
+const entities: Omit<Entity, "links">[] = [
   {
     id: "journals",
     title: "Journals",
@@ -54,6 +54,19 @@ const entities: Entity[] = [
   // "broken" is deliberately absent: opening it exercises the error boundary.
 ];
 
+/** `[[Name]]` resolves by lowercased name, as the fixtures' ids are. */
+function linksIn(blocks: Block[], links: Record<string, LinkTarget> = {}) {
+  for (const block of blocks) {
+    for (const m of block.text.matchAll(/\[\[([^\]]+)\]\]/g)) {
+      const name = m[1]!;
+      const id = name.toLowerCase();
+      links[name] = byId.has(id) ? { kind: "entity", id } : { kind: "missing" };
+    }
+    linksIn(block.children, links);
+  }
+  return links;
+}
+
 export const slowIds = new Set(["slow"]);
 
 const byId = new Map(entities.map((e) => [e.id, e]));
@@ -68,17 +81,23 @@ const delay = <T>(value: T, ms: number) =>
 const cache = new Map<EntityId, Promise<Entity>>();
 
 export const fixtureStore: Store = {
-  entrypoints: once(() => delay([ref("journals"), ref("all")], 100)),
   favourites: once(() =>
     delay([ref("quiddity"), ref("reading"), ref("slow"), ref("broken")], 100),
   ),
+  entities: once(() =>
+    delay(
+      entities.map((e) => ref(e.id)).sort((a, b) => a.title.localeCompare(b.title)),
+      100,
+    ),
+  ),
+  today: once(() => delay(ref("journals"), 100)),
   entity(id) {
     let p = cache.get(id);
     if (!p) {
       const e = byId.get(id);
       p = delay(null, slowIds.has(id) ? 3000 : 80).then(() => {
         if (!e) throw new Error(`No entity ${id}`);
-        return e;
+        return { ...e, links: linksIn(e.blocks) };
       });
       cache.set(id, p);
     }

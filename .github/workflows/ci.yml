@@ -71,6 +71,7 @@ jobs:
         run: |
           cargo fmt --check
           cargo clippy --all-targets --locked
+          cargo test --locked
 
   mutants:
     # Every mutant in the lines a PR changes must be caught by some test.

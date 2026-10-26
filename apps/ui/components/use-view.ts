@@ -22,6 +22,6 @@ export function useView() {
       viewHref({ ...view, open: view.open.filter((o) => o !== id) }),
     toAllClosed: () => viewHref({ ...view, open: [] }),
     toMainFromSide: (id: EntityId) =>
-      viewHref({ main: id, open: view.open.filter((o) => o !== id) }),
+      viewHref({ ...view, main: id, open: view.open.filter((o) => o !== id) }),
   } satisfies View & Record<string, unknown>;
 }

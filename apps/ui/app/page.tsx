@@ -1,5 +1,5 @@
-import { MainEntity } from "@/components/main-entity";
+import { HomeEntity } from "@/components/home-entity";
 
 export default function Home() {
-  return <MainEntity id="journals" />;
+  return <HomeEntity />;
 }

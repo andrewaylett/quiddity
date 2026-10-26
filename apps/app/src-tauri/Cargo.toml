@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/andrewaylett/quiddity"
-rust-version = "1.88"
+rust-version = "1.91"
 publish = false
 
 [lib]
@@ -15,4 +15,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = "2"
 
 [dependencies]
+jiff = "0.2"
+quiddity-core = { path = "../../../crates/core" }
+quiddity-node = { path = "../../../crates/node" }
+serde = { version = "1", features = ["derive"] }
 tauri = "2"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

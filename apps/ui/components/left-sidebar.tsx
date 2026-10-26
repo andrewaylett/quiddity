@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { use } from "react";
 import type { EntityRef } from "@/lib/model";
 import { useRecents } from "@/lib/recents";
@@ -49,8 +51,38 @@ const listSkeleton = (
   </div>
 );
 
-function Loaded({ source }: { source: "entrypoints" | "favourites" }) {
-  return <Items items={use(store[source]())} />;
+function Favourites() {
+  return <Items items={use(store.favourites())} />;
+}
+
+/** Fixed places in the app, as opposed to entities in the graph. */
+const entrypoints = [
+  { title: "Journals", href: "/" },
+  { title: "All entities", href: "/all/" },
+];
+
+function Entrypoints() {
+  const pathname = usePathname();
+  const { main } = useView();
+  return (
+    <ul>
+      {entrypoints.map(({ title, href }) => {
+        const here = !main && (href === "/" ? pathname === "/" : pathname.startsWith(href));
+        return (
+          <li key={href}>
+            <Link
+              href={href}
+              className={`block truncate rounded px-2 py-1 text-sm hover:bg-slate-200 dark:hover:bg-slate-700 ${
+                here ? "bg-slate-200 font-medium dark:bg-slate-700" : ""
+              }`}
+            >
+              {title}
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 function Recents() {
@@ -64,13 +96,11 @@ export function LeftSidebar() {
   return (
     <nav aria-label="Navigation" className="overflow-y-auto">
       <Section title="Entrypoints">
-        <Region pending={listSkeleton} failed={failed}>
-          <Loaded source="entrypoints" />
-        </Region>
+        <Entrypoints />
       </Section>
       <Section title="Favourites">
         <Region pending={listSkeleton} failed={failed}>
-          <Loaded source="favourites" />
+          <Favourites />
         </Region>
       </Section>
       <Section title="Recents">
