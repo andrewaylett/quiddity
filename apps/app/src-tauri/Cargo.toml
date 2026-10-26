@@ -1,0 +1,18 @@
+[package]
+name = "quiddity-app"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/andrewaylett/quiddity"
+rust-version = "1.88"
+publish = false
+
+[lib]
+name = "quiddity_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = "2"
+
+[dependencies]
+tauri = "2"
