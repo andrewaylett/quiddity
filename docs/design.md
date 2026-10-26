@@ -63,7 +63,8 @@ typed binaries.
   the user, not a dumb relay. That lets it keep full history and serve devices
   that have been offline for a long time.
 
-Repository layout (Cargo workspace now; pnpm workspace once there is UI):
+Repository layout (a Cargo workspace for the crates, a pnpm workspace for the
+apps):
 
 ```
 crates/syntax    block Markdown syntax: properties, links, block refs
@@ -72,8 +73,8 @@ crates/sync      sync protocol: messages, framing, per-connection sessions
 crates/node      sync over iroh, and the quiddity-node CLI and headless node
 fuzz/            cargo-fuzz targets
 crates/cli       import/export/fsck tooling (later)
-apps/app         Tauri 2 shell (later)
-apps/ui          Next.js UI, static export (later)
+apps/app         Tauri 2 shell (not part of the Cargo workspace: needs webkit)
+apps/ui          Next.js UI, static export
 docs/
 ```
 
@@ -419,6 +420,20 @@ born:: 1970-01-01
   entities, which merge.
 
 ## UI model
+
+- **Three panes.** Entrypoints, favourites and recents on the left; the
+  current entity in the middle; open secondaries on the right. The panes live
+  in the root layout, so the middle pane is the routed page.
+- **View state is the URL**: `/entity/?id=<main>&open=<a>,<b>`. A static
+  export cannot enumerate entities for dynamic path segments, and the right
+  pane is a list rather than a route. Click opens in the main pane,
+  shift-click opens at the side.
+- **Nothing blocks anything else.** Reading the URL suspends in a static
+  export, so each pane, and each secondary within the right pane, has its own
+  Suspense and error boundary. A card's header sits outside its content's
+  boundary, so it can always be closed.
+- Slate palette (light 50/800, dark 900/200, following the system), IBM Plex
+  Sans bundled with the app.
 
 - **Outliner**: every bullet is a block. A block shows rendered Markdown and
   becomes a CodeMirror 6 editor bound to its `LoroText` when focused, much like

@@ -1,0 +1,65 @@
+"use client";
+
+import { useState, type ReactNode } from "react";
+
+/**
+ * Three panes. The shell itself knows nothing about the URL, so it can render
+ * (and be prerendered) without waiting on anything; each pane is handed in
+ * already wrapped in its own boundary.
+ *
+ * Below `md` the left pane is a drawer; below `lg` the right pane overlays the
+ * main one. The right `aside` is `empty:hidden`, so it takes no room until
+ * something is open.
+ */
+export function Shell({
+  left,
+  right,
+  children,
+}: {
+  left: ReactNode;
+  right: ReactNode;
+  children: ReactNode;
+}) {
+  const [drawer, setDrawer] = useState(false);
+  const pane = "bg-slate-100 dark:bg-slate-800";
+  return (
+    <div className="flex h-dvh overflow-hidden">
+      <aside
+        className={`${pane} fixed inset-y-0 left-0 z-30 flex w-64 shrink-0 flex-col border-r border-slate-200 transition-transform dark:border-slate-700 md:static md:translate-x-0 ${
+          drawer ? "translate-x-0" : "-translate-x-full"
+        }`}
+        onClick={() => setDrawer(false)}
+      >
+        <div className="px-4 py-3 text-lg font-semibold">Quiddity</div>
+        {left}
+      </aside>
+      {drawer && (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          className="fixed inset-0 z-20 bg-slate-900/40 md:hidden"
+          onClick={() => setDrawer(false)}
+        />
+      )}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-700 md:hidden">
+          <button
+            type="button"
+            aria-label="Open navigation"
+            className="rounded px-2 py-1 hover:bg-slate-200 dark:hover:bg-slate-700"
+            onClick={() => setDrawer(true)}
+          >
+            ☰
+          </button>
+          <span className="font-semibold">Quiddity</span>
+        </div>
+        <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
+      </div>
+      <aside
+        className={`${pane} fixed inset-y-0 right-0 z-10 flex w-[min(100%,24rem)] shrink-0 flex-col border-l border-slate-200 shadow-xl empty:hidden dark:border-slate-700 lg:static lg:w-96 lg:shadow-none`}
+      >
+        {right}
+      </aside>
+    </div>
+  );
+}

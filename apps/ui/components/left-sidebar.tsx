@@ -1,0 +1,81 @@
+"use client";
+
+import { use } from "react";
+import type { EntityRef } from "@/lib/model";
+import { useRecents } from "@/lib/recents";
+import { store } from "@/lib/store";
+import { Region, Skeleton } from "./boundary";
+import { EntityLink } from "./entity-link";
+import { useView } from "./use-view";
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="px-2 py-2">
+      <h2 className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+function Items({ items }: { items: EntityRef[] }) {
+  const { main } = useView();
+  if (items.length === 0) {
+    return <p className="px-2 text-sm text-slate-500 dark:text-slate-400">Nothing yet.</p>;
+  }
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>
+          <EntityLink
+            id={item.id}
+            className={`block truncate rounded px-2 py-1 text-sm hover:bg-slate-200 dark:hover:bg-slate-700 ${
+              item.id === main ? "bg-slate-200 font-medium dark:bg-slate-700" : ""
+            }`}
+          >
+            {item.title}
+          </EntityLink>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const listSkeleton = (
+  <div className="space-y-2 px-2">
+    <Skeleton className="h-4 w-3/4" />
+    <Skeleton className="h-4 w-1/2" />
+  </div>
+);
+
+function Loaded({ source }: { source: "entrypoints" | "favourites" }) {
+  return <Items items={use(store[source]())} />;
+}
+
+function Recents() {
+  return <Items items={useRecents()} />;
+}
+
+export function LeftSidebar() {
+  const failed = () => (
+    <p className="px-2 text-sm text-slate-500 dark:text-slate-400">Couldn't load.</p>
+  );
+  return (
+    <nav aria-label="Navigation" className="overflow-y-auto">
+      <Section title="Entrypoints">
+        <Region pending={listSkeleton} failed={failed}>
+          <Loaded source="entrypoints" />
+        </Region>
+      </Section>
+      <Section title="Favourites">
+        <Region pending={listSkeleton} failed={failed}>
+          <Loaded source="favourites" />
+        </Region>
+      </Section>
+      <Section title="Recents">
+        <Recents />
+      </Section>
+    </nav>
+  );
+}

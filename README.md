@@ -13,6 +13,10 @@ See [docs/design.md](docs/design.md) for the current design.
 - `crates/sync`: the sync protocol, independent of transport.
 - `crates/node`: sync over iroh, and `quiddity-node`, a bare-bones command
   line and headless sync node.
+- `apps/ui`: the Next.js UI (static export): three panes, with entrypoints,
+  favourites and recents on the left, the current entity in the middle and
+  open secondaries on the right. Runs on fixtures until the core is wired in.
+- `apps/app`: the Tauri 2 shell that hosts the UI.
 - `fuzz`: fuzz targets for the parsers and the sync protocol.
 
 ## Trying it
@@ -26,6 +30,14 @@ cargo run -p quiddity-node -- -g ~/graph serve --allow <device id>
 quiddity-node -g ~/graph init --blank    # prints this device's id
 quiddity-node -g ~/graph sync <server id>
 quiddity-node -g ~/graph export ~/export
+```
+
+## The app
+
+```sh
+pnpm install
+pnpm ui dev          # the UI alone, in a browser, at http://localhost:3000
+pnpm app dev         # the Tauri shell around it (needs Tauri's system packages)
 ```
 
 ## Testing
