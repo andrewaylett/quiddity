@@ -12,13 +12,13 @@ name = "quiddity_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
 quiddity-core = { path = "../../../crates/core" }
 quiddity-node = { path = "../../../crates/node" }
 serde = { version = "1", features = ["derive"] }
-tauri = "2"
+tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 thiserror = "2"
 

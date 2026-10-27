@@ -7,6 +7,7 @@ jj = "0.46.0"
 pinact = "5.0.2"
 # Must match the wasm-bindgen crate, which crates/wasm pins.
 "cargo:wasm-bindgen-cli" = "0.2.129"
+emsdk = "6.0.13"
 
 # `mise run <task>`; `mise tasks` lists them. `mise trust` once in a fresh
 # checkout, so that mise will read this file.
