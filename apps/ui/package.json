@@ -29,13 +29,13 @@
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
-    "@tailwindcss/postcss": "^4.3.3",
-    "@types/mdast": "^4.0.4",
-    "@types/node": "^22.0.0",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/mdast": "4.0.4",
+    "@types/node": "22.20.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "serve": "14.2.6",
-    "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.0"
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
   }
 }
