@@ -40,6 +40,9 @@ enum Command {
     Export { dir: PathBuf },
     /// Print this device's ID, for other devices' --allow lists.
     Id,
+    /// List the devices holding this graph, latest first, with when each
+    /// last saved it (as far as this device has heard).
+    Devices,
     /// Serve the graph to other devices until interrupted.
     Serve {
         /// A device allowed to connect. Repeat for more.
@@ -107,6 +110,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Command::Import { dir } => {
             let graph = store.load()?;
+            if graph.version() == quiddity_core::Version::default() {
+                // Edits made before joining rest on nothing a compacted
+                // device could apply.
+                anyhow::bail!("this is a blank replica: sync it before importing into it");
+            }
             let imported = import_dir(&graph, &dir)?;
             merge_duplicates(&graph, &Index::build(&graph)?)?;
             store.save(&graph)?;
@@ -117,6 +125,19 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             println!("exported {written} entities");
         }
         Command::Id => println!("{}", store.key()?.public()),
+        Command::Devices => {
+            let me = store.key()?.public().to_string();
+            let mut devices = store.load()?.devices();
+            devices.sort_by(|a, b| b.seen.cmp(&a.seen).then_with(|| a.id.cmp(&b.id)));
+            for device in devices {
+                let this = if device.id == me {
+                    " (this device)"
+                } else {
+                    ""
+                };
+                println!("{} {}{this}", device.id, device.seen);
+            }
+        }
         Command::Serve {
             allow,
             allow_any,

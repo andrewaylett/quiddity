@@ -34,9 +34,14 @@ cargo run -p quiddity-node -- -g ~/graph serve --allow <device id>
 
 # on another device
 quiddity-node -g ~/graph init --blank    # prints this device's id
-quiddity-node -g ~/graph sync <server id>
+quiddity-node -g ~/graph sync <server id>   # join before editing
 quiddity-node -g ~/graph export ~/export
+quiddity-node -g ~/graph devices           # who holds the graph, and when each last saved
 ```
+
+Each device keeps only the history some device might still need: what
+every device has stored, as far as it knows. A device silent for 30 days
+stops holding that back.
 
 ## The app
 

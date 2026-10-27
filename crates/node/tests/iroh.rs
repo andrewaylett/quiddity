@@ -159,6 +159,41 @@ async fn merges_reach_connected_devices() {
     }
 }
 
+/// A device whose edits rest on history its peer has dropped (one that was
+/// evicted) is told so, rather than that the connection went.
+#[tokio::test]
+async fn a_device_behind_its_peer_is_told_so() {
+    let graph = Graph::new();
+    let evicted = Graph::from_snapshot(&graph.snapshot().unwrap()).unwrap();
+    graph.create_block(None, None, "later").unwrap();
+    graph.commit();
+    let compacted =
+        Graph::from_snapshot(&graph.shallow_snapshot(&graph.version()).unwrap()).unwrap();
+    evicted
+        .create_block(None, None, "made on dropped history")
+        .unwrap();
+    evicted.commit();
+
+    let node = Peer::new(compacted, Allowed::Any, "node");
+    let device = Peer::new(evicted, Allowed::Any, "evicted");
+    let (node_router, node_addr) = listen(&node).await;
+    let (device_router, _) = listen(&device).await;
+    let result = device
+        .connect(
+            device_router.endpoint(),
+            node_addr,
+            Some(Duration::from_secs(2)),
+        )
+        .await;
+    assert!(
+        matches!(result, Err(quiddity_node::Error::Behind)),
+        "{result:?}"
+    );
+
+    node_router.shutdown().await.unwrap();
+    device_router.shutdown().await.unwrap();
+}
+
 #[tokio::test]
 async fn unlisted_devices_are_refused() {
     let node = Peer::new(Graph::new(), Allowed::Only(HashSet::new()), "node");
@@ -175,6 +210,10 @@ async fn unlisted_devices_are_refused() {
         )
         .await;
     assert!(result.is_err(), "the connection is closed on them");
+    assert!(
+        !matches!(result, Err(quiddity_node::Error::Behind)),
+        "and not told it's behind"
+    );
     assert!(stranger.graph().roots().is_empty());
 
     node_router.shutdown().await.unwrap();
