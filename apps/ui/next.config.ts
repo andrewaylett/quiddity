@@ -7,6 +7,9 @@ const config: NextConfig = {
   output: "export",
   trailingSlash: true,
   images: { unoptimized: true },
+  // `next dev` otherwise writes its own block into AGENTS.md whenever it
+  // notices an agent, which is a hand-written file.
+  agentRules: false,
 };
 
 export default config;
