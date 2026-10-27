@@ -24,6 +24,10 @@ use tokio::sync::watch;
 /// The protocol's name, negotiated when connecting.
 pub const ALPN: &[u8] = b"quiddity/sync/2";
 
+/// The code a device closes a connection with when the peer is behind its
+/// history, so the peer can say why rather than that the connection went.
+const BEHIND: u32 = 2;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
@@ -132,7 +136,7 @@ impl Peer {
         let connection = endpoint.connect(addr, ALPN).await?;
         let (send, recv) = connection.open_bi().await?;
         let result = self.sync(send, recv, idle).await;
-        connection.close(0u32.into(), b"done");
+        close(&connection, &result);
         result
     }
 
@@ -159,7 +163,7 @@ impl Peer {
             tokio::select! {
                 read = read => {
                     let Some(read) = read else { return Ok(()) };
-                    let Some(n) = read? else { return Ok(()) };
+                    let Some(n) = read.map_err(read_error)? else { return Ok(()) };
                     reader.push(&buf[..n]);
                     while let Some(frame) = reader.next_frame()? {
                         let message = match Message::decode(&frame) {
@@ -203,6 +207,26 @@ async fn write(send: &mut SendStream, message: &Message) -> Result<(), Error> {
     Ok(())
 }
 
+fn close(connection: &Connection, result: &Result<(), Error>) {
+    match result {
+        Err(Error::PeerBehind) => connection.close(BEHIND.into(), b"behind this device's history"),
+        _ => connection.close(0u32.into(), b"done"),
+    }
+}
+
+/// A peer that found this device behind its history closes with
+/// [`BEHIND`]: report that, not the lost connection.
+fn read_error(e: ReadError) -> Error {
+    match e {
+        ReadError::ConnectionLost(ConnectionError::ApplicationClosed(close))
+            if close.error_code == BEHIND.into() =>
+        {
+            Error::Behind
+        }
+        e => e.into(),
+    }
+}
+
 impl ProtocolHandler for Peer {
     async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
         if let Allowed::Only(ids) = &self.inner.allowed
@@ -212,8 +236,8 @@ impl ProtocolHandler for Peer {
             return Ok(());
         }
         let (send, recv) = connection.accept_bi().await?;
-        self.sync(send, recv, None)
-            .await
-            .map_err(AcceptError::from_err)
+        let result = self.sync(send, recv, None).await;
+        close(&connection, &result);
+        result.map_err(AcceptError::from_err)
     }
 }

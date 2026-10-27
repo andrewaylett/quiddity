@@ -62,12 +62,11 @@ fn import_serve_sync_export() {
     );
     let b_id = run(node(&b).args(["init", "--blank"]));
     run(node(&c).args(["init", "--blank"]));
-    // b has something of its own, which the server must save as it arrives:
-    // the server is killed, not stopped, so it has no chance to save later.
     let from_b = tmp.path().join("from-b");
     fs::create_dir_all(from_b.join("pages")).unwrap();
     fs::write(from_b.join("pages/Bob.md"), "- Written on b\n").unwrap();
-    run(node(&b).arg("import").arg(&from_b));
+    let early = node(&b).arg("import").arg(&from_b).output().unwrap();
+    assert!(!early.status.success(), "a blank replica must join first");
 
     let mut server = node(&a)
         .args(["serve", "--allow", &b_id, "--local", "127.0.0.1:0"])
@@ -88,7 +87,16 @@ fn import_serve_sync_export() {
             .output()
             .unwrap()
     };
-    assert!(sync(&b).status.success());
+    let synced = |graph: &Path| {
+        let output = sync(graph);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+    };
+    // b joins, then adds something of its own, which the server must save
+    // as it arrives: it's killed, not stopped, so it can't save later.
+    synced(&b);
+    run(node(&b).arg("import").arg(&from_b));
+    synced(&b);
     assert!(!sync(&c).status.success(), "c isn't on the allow list");
     server.kill().unwrap();
     server.wait().unwrap();
@@ -96,6 +104,21 @@ fn import_serve_sync_export() {
     for (graph, out) in [(&a, "a-out"), (&b, "b-out"), (&c, "c-out")] {
         run(node(graph).arg("export").arg(tmp.path().join(out)));
     }
+    // Both know both devices: each records itself when it saves, and the
+    // records reach the other by syncing. c was refused, and hasn't joined.
+    for (graph, me, other) in [(&a, &a_id, &b_id), (&b, &b_id, &a_id)] {
+        let devices = run(node(graph).arg("devices"));
+        let lines: Vec<&str> = devices.lines().collect();
+        assert_eq!(lines.len(), 2, "{devices}");
+        let listed = |id: &str, mine: bool| {
+            lines
+                .iter()
+                .any(|l| l.starts_with(id) && l.ends_with("(this device)") == mine)
+        };
+        assert!(listed(me, true) && listed(other, false), "{devices}");
+    }
+    assert_eq!(run(node(&c).arg("devices")), "");
+
     let exported = files(&tmp.path().join("a-out"));
     assert_eq!(exported.len(), 3);
     assert_eq!(files(&tmp.path().join("b-out")), exported);
