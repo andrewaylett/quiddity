@@ -86,6 +86,11 @@ impl Replica {
         js(&self.view.entities()?)
     }
 
+    /// Every entity and the links between them, for drawing as a graph.
+    pub fn connections(&self) -> Result<JsValue, JsError> {
+        js(&self.view.connections()?)
+    }
+
     pub fn favourites(&self) -> Result<JsValue, JsError> {
         js(&self.view.favourites()?)
     }

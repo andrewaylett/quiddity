@@ -19,6 +19,24 @@ pub struct EntityRef {
     pub title: String,
 }
 
+/// The entities, and which of them link to which, for drawing as a graph.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Connections {
+    /// As [`View::entities`].
+    pub nodes: Vec<EntityRef>,
+    pub edges: Vec<Edge>,
+}
+
+/// One entity linking to another, from anywhere in its blocks. However many
+/// links there are, there is one edge.
+#[derive(Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase")]
+pub struct Edge {
+    pub source: String,
+    pub target: String,
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Block {
@@ -170,6 +188,30 @@ impl View {
             .collect::<Result<Vec<_>>>()?;
         refs.sort_by_cached_key(|e| (e.title.to_lowercase(), e.id.clone()));
         Ok(refs)
+    }
+
+    /// Every entity, and the links between them. Links to nowhere, and an
+    /// entity's links to itself, are left out.
+    pub fn connections(&self) -> Result<Connections> {
+        let mut edges = BTreeSet::new();
+        {
+            let index = self.index()?;
+            for target in index.entities() {
+                for backlink in index.backlinks(target.id) {
+                    let source = index.canonical(self.graph.entity_of(backlink.source));
+                    if source != target.id {
+                        edges.insert(Edge {
+                            source: source.to_string(),
+                            target: target.id.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(Connections {
+            nodes: self.entities()?,
+            edges: edges.into_iter().collect(),
+        })
     }
 
     /// Entities whose `favourite` property is true.

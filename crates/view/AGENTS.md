@@ -57,6 +57,16 @@ value is `None` here and `null` in JavaScript (the wasm layer sets that).
 - Reading order is depth first; "the block before" a block is the previous one
   in that order, which for a first child is its parent.
 
+## Connections
+
+`connections()` is the whole graph for drawing: every entity (as `entities`)
+and one `Edge` per pair of entities where one links to the other from anywhere
+in its blocks, however many links there are, including property values. The
+source is the entity a link's block belongs to, as merged duplicates go, and an
+entity's links to itself and links to nowhere make no edge. It walks every
+backlink, so like the other queries it is a whole-graph cost the UI pays once
+per revision.
+
 ## Links to nowhere
 
 A `[[link]]` with no entity is made one in two ways (`links.rs`):
