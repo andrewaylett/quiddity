@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useGraph } from "@/lib/use-graph";
 import type { LinkTarget, Property, PropertyValue } from "@/lib/model";
@@ -88,6 +89,42 @@ function Value({
   }
 }
 
+/** A property's key, which goes to the entity that defines the property. */
+function PropertyKey({
+  property,
+  className,
+  children,
+}: {
+  property: Property;
+  className: string;
+  children: ReactNode;
+}) {
+  const graph = useGraph();
+  const view = useView();
+  const router = useRouter();
+  if (property.definition !== null) {
+    return (
+      <EntityLink id={property.definition} className={`${className} hover:underline`}>
+        {children}
+      </EntityLink>
+    );
+  }
+  // Nobody has defined it yet, so following it does.
+  return (
+    <button
+      type="button"
+      className={`${className} underline decoration-dashed underline-offset-2 hover:decoration-solid`}
+      title="Not defined yet. Open it to define it."
+      onClick={(e) => {
+        const id = graph.defineProperty(property.key);
+        router.push(e.shiftKey ? view.toSide(id) : view.toMain(id));
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 /** A property, as a pill: the key, then its value if it has one. */
 export function PropertyChip({
   property,
@@ -99,10 +136,14 @@ export function PropertyChip({
   return (
     <span className="inline-flex items-baseline gap-1 rounded-full bg-slate-200 px-2 py-0.5 text-xs leading-5 dark:bg-slate-700">
       {property.value === null ? (
-        <span>#{property.key}</span>
+        <PropertyKey property={property} className="">
+          #{property.key}
+        </PropertyKey>
       ) : (
         <>
-          <span className="text-slate-500 dark:text-slate-400">{property.key}</span>
+          <PropertyKey property={property} className="text-slate-500 dark:text-slate-400">
+            {property.key}
+          </PropertyKey>
           <span>
             <Value value={property.value} links={links} />
           </span>

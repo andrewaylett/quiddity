@@ -31,6 +31,8 @@ export interface Property {
    * property, the whole line. */
   start: number;
   end: number;
+  /** The entity that defines the property, if anyone has. */
+  definition: EntityId | null;
 }
 
 /** Where a `[[link]]` goes. */
