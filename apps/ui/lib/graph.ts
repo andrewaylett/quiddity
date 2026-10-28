@@ -1,5 +1,5 @@
 import init, { Replica } from "./wasm/quiddity_wasm";
-import type { Entity, EntityId, EntityRef, Merged, Reference } from "./model";
+import type { Connections, Entity, EntityId, EntityRef, Merged, Reference } from "./model";
 
 /** Where the graph lives: the Tauri shell, or memory for plain-browser dev. */
 export interface Backend {
@@ -76,6 +76,8 @@ export class Graph {
 
   entity = (id: EntityId) => this.read<Entity>(`e:${id}`, () => this.replica.entity(id));
   entities = () => this.read<EntityRef[]>("entities", () => this.replica.entities());
+  connections = () =>
+    this.read<Connections>("connections", () => this.replica.connections());
   favourites = () => this.read<EntityRef[]>("favourites", () => this.replica.favourites());
   journals = () =>
     this.read<EntityRef[]>("journals", () => this.replica.journals(today()));

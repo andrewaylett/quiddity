@@ -41,6 +41,12 @@ export type LinkTarget =
   | { kind: "ambiguous"; ids: EntityId[] }
   | { kind: "missing" };
 
+/** Every entity, and which link to which: one edge per pair, however many links. */
+export interface Connections {
+  nodes: EntityRef[];
+  edges: { source: EntityId; target: EntityId }[];
+}
+
 export interface Entity extends EntityRef {
   /** False for journals and property entities: their date or name is what
    * identifies them. */
