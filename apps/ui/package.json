@@ -36,7 +36,7 @@
     "@tailwindcss/postcss": "4.3.3",
     "@types/d3-drag": "3.0.7",
     "@types/d3-force": "3.0.10",
-    "@types/d3-selection": "3.0.11",
+    "@types/d3-selection": "3.0.12",
     "@types/d3-zoom": "3.0.8",
     "@types/mdast": "4.0.4",
     "@types/node": "22.20.5",
