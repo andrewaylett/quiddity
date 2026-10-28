@@ -79,6 +79,11 @@ A `[[link]]` with no entity is made one in two ways (`links.rs`):
   entity real, and it keeps its name.
 - Saving is one undo step of its own, apart from the typing before it.
 
+A property's key goes to the entity that defines it: `Property::definition` is
+that entity's id (found by name as `Index::property_entity` does) or `None`, and
+`define_property(key)` makes one, a property entity with an empty block, when
+there is none. Like a link to nowhere, the UI makes it on following.
+
 ## Tests
 
 `tests.rs` builds graphs in memory with `view_with` and `page`. The queries,

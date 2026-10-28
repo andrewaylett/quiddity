@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use quiddity_core::syntax::{Link, parse_block};
+use quiddity_core::syntax::{Link, Value, parse_block};
 use quiddity_core::{BlockId, Resolution};
 
 use crate::query::link_key;
@@ -45,6 +45,25 @@ impl View {
             None => {
                 self.structural();
                 let made = self.make_linked_entity(&link);
+                self.edited(made)?
+            }
+        };
+        Ok(id.to_string())
+    }
+
+    /// The entity that defines the property `key`, made first if nobody has
+    /// defined it: a property entity, named for the key, with an empty block
+    /// to describe it in. Following a property's key goes here.
+    pub fn define_property(&self, key: &str) -> Result<String> {
+        let found = {
+            let index = self.index()?;
+            index.property_entity(key).map(|id| index.canonical(id))
+        };
+        let id = match found {
+            Some(id) => id,
+            None => {
+                self.structural();
+                let made = self.make_property_entity(key);
                 self.edited(made)?
             }
         };
@@ -108,6 +127,17 @@ impl View {
             self.edited(Ok(()))?;
         }
         Ok(made)
+    }
+
+    fn make_property_entity(&self, key: &str) -> Result<BlockId> {
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(quiddity_core::Error::EmptyName.into());
+        }
+        let kind = Value::Text("property".to_owned());
+        let entity = self.graph.create_entity(key, &[("type", Some(kind))])?;
+        self.graph.create_block(Some(entity), None, "")?;
+        Ok(entity)
     }
 
     /// An entity for `link` to go to: named for it, with the properties its

@@ -184,6 +184,13 @@ impl Replica {
         Ok(self.view.follow_link(key)?)
     }
 
+    /// The entity that defines the property `key`, made first if there is
+    /// none.
+    #[wasm_bindgen(js_name = defineProperty)]
+    pub fn define_property(&self, key: &str) -> Result<String, JsError> {
+        Ok(self.view.define_property(key)?)
+    }
+
     /// Settles a block after editing, given its text from before: makes an
     /// entity for each link it gained that goes nowhere, or corrects the
     /// name of one made from a link just edited. Returns the ids made.
