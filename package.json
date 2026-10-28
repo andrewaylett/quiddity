@@ -1,7 +1,7 @@
 {
   "name": "quiddity",
   "private": true,
-  "packageManager": "pnpm@10.34.8",
+  "packageManager": "pnpm@10.34.9",
   "scripts": {
     "ui": "pnpm --filter @quiddity/ui",
     "app": "pnpm --filter @quiddity/app"
