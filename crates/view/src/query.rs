@@ -65,7 +65,7 @@ pub enum PropertyValue {
 }
 
 /// A link as written between its brackets: the key of [`Entity::links`].
-fn link_key(link: &Link) -> String {
+pub(crate) fn link_key(link: &Link) -> String {
     let written = format_link(link);
     written
         .strip_prefix("[[")

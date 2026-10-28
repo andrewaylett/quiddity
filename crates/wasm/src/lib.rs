@@ -177,6 +177,21 @@ impl Replica {
         Ok(self.view.rename_entity(id, name)?)
     }
 
+    /// The entity a link goes to, made first if there is none. `key` is the
+    /// text between the brackets, as the entity's `links` has it.
+    #[wasm_bindgen(js_name = followLink)]
+    pub fn follow_link(&self, key: &str) -> Result<String, JsError> {
+        Ok(self.view.follow_link(key)?)
+    }
+
+    /// Settles a block after editing, given its text from before: makes an
+    /// entity for each link it gained that goes nowhere, or corrects the
+    /// name of one made from a link just edited. Returns the ids made.
+    #[wasm_bindgen(js_name = commitBlock)]
+    pub fn commit_block(&self, id: &str, before: &str) -> Result<Vec<String>, JsError> {
+        Ok(self.view.commit_block(id, before)?)
+    }
+
     /// Splits a block at `at`; returns the new block.
     pub fn split(&self, id: &str, at: usize) -> Result<String, JsError> {
         Ok(self.view.split(id, at)?)
@@ -230,6 +245,22 @@ mod tests {
         replica.clear_undo();
         assert!(!replica.undo().unwrap(), "cleared");
         assert_eq!(replica.block_text(&id).unwrap(), "hi!");
+    }
+
+    #[test]
+    fn links_to_nowhere_get_an_entity_when_followed_or_saved() {
+        let shell = Graph::new();
+        let page = shell.create_entity("Page", &[]).unwrap();
+        let block = shell.create_block(Some(page), None, "").unwrap();
+        let replica = Replica::new(&shell.snapshot().unwrap()).unwrap();
+        let id = block.to_string();
+
+        let followed = replica.follow_link("Nowhere").unwrap();
+        assert_eq!(replica.follow_link("Nowhere").unwrap(), followed);
+        replica.splice_text(&id, 0, 0, "[[Else]]").unwrap();
+        let made = replica.commit_block(&id, "").unwrap();
+        assert_eq!(made.len(), 1);
+        assert_ne!(made[0], followed);
     }
 
     #[test]

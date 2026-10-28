@@ -57,6 +57,28 @@ value is `None` here and `null` in JavaScript (the wasm layer sets that).
 - Reading order is depth first; "the block before" a block is the previous one
   in that order, which for a first child is its parent.
 
+## Links to nowhere
+
+A `[[link]]` with no entity is made one in two ways (`links.rs`):
+
+- **`follow_link(key)`** when the UI follows it: the entity, named for the
+  link, with the properties its qualifiers ask for and an empty block. An
+  ambiguous link is an error.
+- **`commit_block(id, before)`** when editing a block ends; the UI passes the
+  text it had when editing began. It makes an entity for each link the edit
+  *gained*. Links already in `before` are left alone, so a block that arrived
+  from another device with a dangling link makes nothing until the link is
+  followed.
+- **Correcting a link renames the entity it made.** The links either side of
+  the edit are set aside and the ones in between are paired in order; a pair
+  whose old link goes to an entity that is empty, linked from nothing but this
+  block, and unqualified gets `correct_entity_name` (no alias) instead of a
+  second entity. "Empty" is what rules out journals, property entities and a
+  link that reached its entity by an alias: each has a properties block. Anything
+  more than that (notes written under it, another link to it) makes the
+  entity real, and it keeps its name.
+- Saving is one undo step of its own, apart from the typing before it.
+
 ## Tests
 
 `tests.rs` builds graphs in memory with `view_with` and `page`. The queries,
