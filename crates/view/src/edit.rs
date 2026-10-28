@@ -34,7 +34,7 @@ fn byte_offset(text: &str, utf16: usize) -> Option<usize> {
 }
 
 impl View {
-    fn edited<T>(&self, result: Result<T>) -> Result<T> {
+    pub(crate) fn edited<T>(&self, result: Result<T>) -> Result<T> {
         self.graph.commit();
         self.changed();
         result
@@ -42,7 +42,7 @@ impl View {
 
     /// Edits other than typing are each a step of their own, so they end any
     /// burst of typing first.
-    fn structural(&self) {
+    pub(crate) fn structural(&self) {
         self.end_typing();
     }
 

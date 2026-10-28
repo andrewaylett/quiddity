@@ -7,6 +7,7 @@
 //! to WASM (`quiddity-wasm`), so every replica answers from its own copy.
 
 mod edit;
+mod links;
 mod query;
 
 use std::cell::{Cell, Ref, RefCell};
@@ -28,6 +29,10 @@ pub enum Error {
     NotRenamable(String),
     #[error("{0:?} is not a date")]
     NotADate(String),
+    #[error("{0:?} is not a link")]
+    NotALink(String),
+    #[error("{0:?} matches several entities")]
+    AmbiguousLink(String),
     #[error("offset {0} is not between characters")]
     BadOffset(usize),
 }
