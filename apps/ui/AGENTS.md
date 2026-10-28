@@ -76,6 +76,25 @@ the current entity in the middle, open secondaries on the right.
   is `renamable`: Enter or leaving the field keeps it, Escape drops it. Side
   cards and the journals feed show plain titles.
 
+## Graph view
+
+`/graph/` (an entrypoint) draws `graph.connections()` with d3: `d3-force` lays
+it out, `d3-zoom` pans and zooms, `d3-drag` moves nodes. **d3 owns the SVG
+inside the `<svg>`; React owns only the `<svg>` and calls `draw()` once on
+mount and `update(data)` when the graph changes**, so a node's `<a>` element is
+d3's, not React's. Nodes are real `<a href>` links (click opens the entity,
+shift-click opens it at the side) and are labelled by `aria-label`.
+
+- **Positions and the view are remembered** (`lib/graph-layout.ts`, in memory
+  and in localStorage), so leaving and coming back finds everything where it
+  was. They are saved when the layout settles, after a zoom and on leaving, and
+  **nothing is saved before the first nodes are drawn**: setting the initial
+  zoom ends a zoom, which would otherwise wipe the layout about to be
+  restored. Entities with no position are placed beside one they link to and
+  the layout only settles gently, so what was there doesn't move. Positions of
+  entities that have gone are dropped when next saved.
+- Dragging lets go on release (nodes aren't pinned).
+
 ## Rendering
 
 `RenderedBlock` is how a block reads when not being edited: `splitBlock` takes
