@@ -1,7 +1,10 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import { useGraph } from "@/lib/use-graph";
 import type { LinkTarget, Property, PropertyValue } from "@/lib/model";
 import { EntityLink } from "./entity-link";
+import { useView } from "./use-view";
 
 const unresolved = "cursor-help underline decoration-dashed underline-offset-2";
 
@@ -16,20 +19,44 @@ export function LinkOrNot({
   links: Record<string, LinkTarget>;
 }) {
   const target = links[linkKey] ?? { kind: "missing" };
-  return target.kind === "entity" ? (
-    <EntityLink
-      id={target.id}
-      className="text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
-    >
-      {name}
-    </EntityLink>
-  ) : (
+  if (target.kind === "entity") {
+    return (
+      <EntityLink
+        id={target.id}
+        className="text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
+      >
+        {name}
+      </EntityLink>
+    );
+  }
+  if (target.kind === "missing") return <NewEntityLink name={name} linkKey={linkKey} />;
+  return (
     <span
       className={`text-slate-500 dark:text-slate-400 ${unresolved}`}
-      title={target.kind === "ambiguous" ? "Several entities match" : "No such entity"}
+      title="Several entities match"
     >
       {name}
     </span>
+  );
+}
+
+/** A link to an entity that doesn't exist yet. Following it makes the entity. */
+function NewEntityLink({ name, linkKey }: { name: string; linkKey: string }) {
+  const graph = useGraph();
+  const view = useView();
+  const router = useRouter();
+  return (
+    <button
+      type="button"
+      className="text-sky-700 underline decoration-dashed underline-offset-2 hover:decoration-solid dark:text-sky-300"
+      title="No such entity yet. Open it to make it."
+      onClick={(e) => {
+        const id = graph.followLink(linkKey);
+        router.push(e.shiftKey ? view.toSide(id) : view.toMain(id));
+      }}
+    >
+      {name}
+    </button>
   );
 }
 

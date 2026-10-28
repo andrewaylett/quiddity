@@ -27,14 +27,9 @@ test("unlinked references load on request and show mentions that aren't links", 
   await expect(page.getByText("Notes on loro and other CRDTs")).toBeVisible();
 });
 
-test("a link that goes nowhere is marked, and one that goes somewhere works", async ({ page }) => {
+test("a link that goes somewhere works", async ({ page }) => {
   await openEntity(page, "Quiddity");
   const main = page.locator("main article > ul");
-  await main.getByText("Local-first").click();
-  await page.keyboard.press("End");
-  await page.keyboard.type(" and [[Nowhere]]");
-  await page.keyboard.press("Escape");
-  await expect(main.getByText("Nowhere")).toHaveAttribute("title", "No such entity");
   await main.getByRole("link", { name: "Loro" }).click();
   await expect(page.getByRole("heading", { name: "Loro", level: 1 })).toBeVisible();
 });

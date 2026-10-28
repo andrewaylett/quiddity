@@ -60,6 +60,13 @@ the current entity in the middle, open secondaries on the right.
 - IDs held by editing state go dead across an undo of a deletion; that just
   ends the edit.
 
+- **Leaving a block saves it** (`EditableOutline`): it remembers each block's
+  text from when editing began and calls `graph.commitBlock(id, before)` when
+  editing moves on or the page is left. That is what makes an entity for a
+  `[[link]]` the edit added, and renames one a moment-old link made if the
+  link is corrected. A link to nowhere that is already in a block (written on
+  another device, or left by an undo) is a button, `NewEntityLink`, and
+  following it makes the entity (`graph.followLink`).
 - The main pane's title (`EditableTitle`) renames in place when the entity
   is `renamable`: Enter or leaving the field keeps it, Escape drops it. Side
   cards and the journals feed show plain titles.

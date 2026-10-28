@@ -129,6 +129,19 @@ export class Graph {
     return this.edited(this.replica.renameEntity(id, name));
   }
 
+  /** The entity a link goes to, made first if there is none. `key` is the
+   * text between the brackets, as an entity's `links` has it. */
+  followLink(key: string) {
+    return this.edited(this.replica.followLink(key));
+  }
+
+  /** Settles a block after editing, given its text from before editing began:
+   * links it gained that go nowhere get an entity, and one made from a link
+   * just corrected is renamed. Returns the ids made. */
+  commitBlock(id: string, before: string) {
+    return this.edited(this.replica.commitBlock(id, before));
+  }
+
   /** Splits a block at `at`; returns the new block. */
   split(id: string, at: number) {
     return this.edited(this.replica.split(id, at));
