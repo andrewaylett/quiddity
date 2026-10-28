@@ -6,16 +6,24 @@ import { useRead } from "@/lib/use-graph";
 import { BlockEditor } from "./block-editor";
 import { EditableOutline } from "./editing";
 import { EditingContext } from "./editing-context";
-import { RenderedBlock } from "./rendered-block";
+import { RenderedBlock, splitBlock } from "./rendered-block";
 
 /** One block: its text, rendered or being edited, then its children. */
 function BlockRow({ block, links }: { block: Block; links: Record<string, LinkTarget> }) {
   const editing = useContext(EditingContext);
   const current = editing?.current;
   const isEditing = current?.id === block.id;
+  // A block of nothing but properties is drawn as chips, which need no bullet.
+  // The bullet's place stays, so the chips line up with the text around them.
+  const { prose, lineProps } = splitBlock(block);
+  const chipsOnly = !isEditing && prose.trim() === "" && lineProps.length > 0;
   return (
     <li className="flex gap-2">
-      <span aria-hidden className="mt-2.5 size-1.5 shrink-0 rounded-full bg-slate-400" />
+      <span
+        aria-hidden
+        data-bullet
+        className={`mt-2.5 size-1.5 shrink-0 rounded-full bg-slate-400 ${chipsOnly ? "invisible" : ""}`}
+      />
       <div className="min-w-0 flex-1 py-0.5">
         {isEditing ? (
           <BlockEditor id={block.id} caret={current.caret} />

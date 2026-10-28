@@ -67,6 +67,11 @@ the current entity in the middle, open secondaries on the right.
   link is corrected. A link to nowhere that is already in a block (written on
   another device, or left by an undo) is a button, `NewEntityLink`, and
   following it makes the entity (`graph.followLink`).
+- **A property chip's key goes to the entity that defines the property**
+  (`Property.definition`). With none yet it is a button, and following it
+  makes the entity (`graph.defineProperty`), as a link to nowhere does. A block
+  of nothing but properties is drawn as chips with its bullet hidden, not
+  removed, so the chips line up with the text around them.
 - The main pane's title (`EditableTitle`) renames in place when the entity
   is `renamable`: Enter or leaving the field keeps it, Escape drops it. Side
   cards and the journals feed show plain titles.

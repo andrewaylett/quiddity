@@ -135,6 +135,11 @@ export class Graph {
     return this.edited(this.replica.followLink(key));
   }
 
+  /** The entity that defines the property `key`, made first if there is none. */
+  defineProperty(key: string) {
+    return this.edited(this.replica.defineProperty(key));
+  }
+
   /** Settles a block after editing, given its text from before editing began:
    * links it gained that go nowhere get an entity, and one made from a link
    * just corrected is renamed. Returns the ids made. */

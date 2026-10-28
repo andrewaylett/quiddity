@@ -128,3 +128,38 @@ test("clicking a link or chip doesn't start editing, and selecting text doesn't 
   // A double-click selects a word; the second click must not have opened an editor over it.
   await expect(page.locator(".cm-content")).toHaveCount(1);
 });
+
+test("a property's key goes to the entity that defines it, making it the first time", async ({ page }) => {
+  const block = await write(page, "A task\nstatus:: open");
+  const key = block.getByRole("button", { name: "status", exact: true });
+  await expect(key).toHaveAttribute("title", /not defined yet/i);
+  await key.click();
+  await expect(page.getByRole("heading", { name: "status", level: 1 })).toBeVisible();
+
+  // Defined now, so the key is a plain link, and it leads to the same place.
+  await page.locator("nav").getByRole("link", { name: "Reading list" }).first().click();
+  const again = page.locator("main article > ul > li").first().locator("[data-block-text]");
+  await expect(again.getByRole("button", { name: "status" })).toHaveCount(0);
+  await again.getByRole("link", { name: "status", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "status", level: 1 })).toBeVisible();
+});
+
+test("a valueless property is a link too", async ({ page }) => {
+  const block = await write(page, "todo\n#urgent");
+  await block.getByRole("button", { name: "#urgent" }).click();
+  await expect(page.getByRole("heading", { name: "urgent", level: 1 })).toBeVisible();
+});
+
+test("a block of nothing but properties has no bullet, until it is edited", async ({ page }) => {
+  const first = await write(page, "status:: open");
+  const row = page.locator("main article > ul > li").first();
+  await expect(first.getByText("open", { exact: true })).toBeVisible();
+  await expect(row.locator("[data-bullet]")).toHaveClass(/invisible/);
+  // The next block has prose, so it has its bullet.
+  await expect(page.locator("main article > ul > li").nth(1).locator("[data-bullet]")).not.toHaveClass(
+    /invisible/,
+  );
+  // Editing shows the source, and the bullet comes back with it.
+  await first.click();
+  await expect(row.locator("[data-bullet]")).not.toHaveClass(/invisible/);
+});
