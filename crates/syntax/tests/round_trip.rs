@@ -135,7 +135,10 @@ proptest! {
             match line {
                 Line::Property(key, value) => {
                     let written = format_property_line(key, value.as_ref());
-                    expected.push((key.clone(), value.clone(), PropertyStyle::Line, written.clone()));
+                    // Without a value it's written `#key`, which in a block
+                    // is an inline property like any other.
+                    let style = if value.is_some() { PropertyStyle::Line } else { PropertyStyle::Inline };
+                    expected.push((key.clone(), value.clone(), style, written.clone()));
                     text.push_str(&written);
                 }
                 Line::Mixed(fragments) => {

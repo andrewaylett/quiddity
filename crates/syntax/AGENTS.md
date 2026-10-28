@@ -23,6 +23,10 @@ The reference parser and formatter for block text: `key:: value` lines,
 - **References come from structure.** Links and block refs in a value count
   at the top level or in a list, but not inside quoted text or qualifiers.
   `Refs` collects them the same way for inline and line properties.
+- **`#key` alone on a line is `key::`.** `parse_property_line` (and so
+  `is_properties_block`) accepts it, and `format_property_line` writes a
+  property with no value that way. `parse_block` still reads it as an inline
+  property, since in prose it is a tag.
 - `#` starts an inline property only after whitespace, `(`, the start of
   the text, or directly after another inline property (`#a(1)#b(2)`). Code
   spans and fences are skipped; all-digit keys (`#123`) aren't keys.

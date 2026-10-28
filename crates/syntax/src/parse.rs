@@ -91,13 +91,23 @@ pub fn is_properties_block(text: &str) -> bool {
     any
 }
 
-/// Parses a `key:: value` line.
+/// Parses a `key:: value` line, or a line that is only `#key`, which is the
+/// same property without a value.
 ///
 /// The key must start with a letter, digit or underscore and may not contain
 /// `:`, `#`, brackets or parentheses. `::` must be followed by whitespace or
 /// the end of the line.
 pub fn parse_property_line(line: &str) -> Option<(String, Option<Value>)> {
-    split_property_line(line).map(|(key, value)| (key, value.map(parse_line_value)))
+    split_property_line(line)
+        .map(|(key, value)| (key, value.map(parse_line_value)))
+        .or_else(|| hash_property_line(line).map(|key| (key, None)))
+}
+
+/// The key of a line that is nothing but `#key`.
+fn hash_property_line(line: &str) -> Option<String> {
+    let mut sc = Scanner::new(line.trim().strip_prefix('#')?);
+    let key = parse_key(&mut sc)?;
+    sc.at_end().then_some(key)
 }
 
 /// Splits a `key:: value` line into its key and unparsed value.
@@ -608,6 +618,18 @@ mod tests {
             ]
         );
         assert_eq!(props("empty::"), vec![prop("empty", None)]);
+        let lines: Vec<_> = "#flag\n  #[[Due date]]\nkey:: v"
+            .lines()
+            .map(|l| parse_property_line(l).unwrap())
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                prop("flag", None),
+                prop("Due date", None),
+                prop("key", Some(text("v")))
+            ]
+        );
         assert_eq!(
             props("  indented:: yes"),
             vec![prop("indented", Some(text("yes")))]
@@ -816,7 +838,11 @@ mod tests {
         assert!(is_properties_block("type:: journal\n\ndate:: 2026-10-25\n"));
         assert!(!is_properties_block("type:: journal\nand some text"));
         assert!(!is_properties_block(""));
-        assert!(!is_properties_block("#tag"));
+        assert!(is_properties_block("#tag"));
+        assert!(is_properties_block("type:: person\n#flag"));
+        assert!(!is_properties_block("#tag and prose"));
+        assert!(!is_properties_block("#tag(1)"));
+        assert!(!is_properties_block("#123"));
     }
 
     #[test]

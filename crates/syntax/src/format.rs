@@ -33,11 +33,12 @@ pub fn format_inline_property(key: &str, value: Option<&Value>) -> String {
     }
 }
 
-/// Formats a `key:: value` line. The key must be valid as a line key.
+/// Formats a `key:: value` line, or `#key` for a property without a value.
+/// The key must be valid as a line key.
 pub fn format_property_line(key: &str, value: Option<&Value>) -> String {
     match value {
         Some(v) => format!("{key}:: {}", format_in(v, Context::Line)),
-        None => format!("{key}::"),
+        None => format_inline_property(key, None),
     }
 }
 
