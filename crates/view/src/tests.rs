@@ -904,6 +904,78 @@ mod new_links {
     }
 }
 
+mod connections {
+    use super::*;
+
+    fn edges(v: &View) -> Vec<(String, String)> {
+        let title = |id: &str| {
+            let nodes = v.connections().unwrap().nodes;
+            nodes.into_iter().find(|n| n.id == id).unwrap().title
+        };
+        v.connections()
+            .unwrap()
+            .edges
+            .iter()
+            .map(|e| (title(&e.source), title(&e.target)))
+            .collect()
+    }
+
+    #[test]
+    fn an_edge_is_one_entity_linking_to_another_however_often() {
+        let v = view_with(|g| {
+            let a = g.create_entity("A", &[]).unwrap();
+            let b = g.create_entity("B", &[]).unwrap();
+            g.create_entity("C", &[]).unwrap();
+            let top = note(g, a, "see [[B]] and [[b]]");
+            note(g, top, "again [[B]]");
+            note(g, a, "owner:: [[C]]");
+            note(g, b, "back to [[A]], and to [[B]] itself, and [[Nowhere]]");
+        });
+        let nodes: Vec<_> = v
+            .connections()
+            .unwrap()
+            .nodes
+            .into_iter()
+            .map(|n| n.title)
+            .collect();
+        assert_eq!(
+            nodes,
+            ["A", "B", "C"],
+            "as `entities`, and Nowhere isn't one"
+        );
+        let mut edges = edges(&v);
+        edges.sort();
+        let pair = |a: &str, b: &str| (a.to_owned(), b.to_owned());
+        assert_eq!(edges, [pair("A", "B"), pair("A", "C"), pair("B", "A")]);
+    }
+
+    #[test]
+    fn a_duplicate_journals_links_belong_to_the_one_it_is_merged_into() {
+        let props = [("type", text("journal")), ("date", text("2026-10-26"))];
+        let v = view_with(|g| {
+            let kept = g.create_entity("2026-10-26", &props).unwrap();
+            let dup = g.create_entity("2026-10-26", &props).unwrap();
+            let target = g.create_entity("Target", &[]).unwrap();
+            note(g, kept, "kept");
+            note(g, dup, "writes [[Target]]");
+            let _ = target;
+        });
+        let connections = v.connections().unwrap();
+        assert_eq!(
+            connections.nodes.len(),
+            2,
+            "the duplicate is one with its twin"
+        );
+        assert_eq!(edges(&v), [("2026-10-26".to_owned(), "Target".to_owned())]);
+    }
+
+    #[test]
+    fn an_empty_graph_has_no_edges() {
+        let v = view_with(|_| {});
+        assert_eq!(v.connections().unwrap().edges, []);
+    }
+}
+
 mod property_links {
     use super::*;
 
