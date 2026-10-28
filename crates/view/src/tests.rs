@@ -904,6 +904,80 @@ mod new_links {
     }
 }
 
+mod property_links {
+    use super::*;
+
+    fn definitions(v: &View, page: &str) -> Vec<Option<String>> {
+        let blocks = v.entity(page).unwrap().blocks;
+        blocks
+            .iter()
+            .flat_map(|b| &b.properties)
+            .map(|p| p.definition.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_property_points_at_the_entity_that_defines_it() {
+        let mut status = String::new();
+        let v = view_with(|g| {
+            let defined = g
+                .create_entity("Status", &[("type", text("property"))])
+                .unwrap();
+            status = defined.to_string();
+            let page = g.create_entity("Page", &[]).unwrap();
+            note(g, page, "status:: done");
+            note(g, page, "later #STATUS(open) and #mood");
+        });
+        let page = id_of(&v, "Page");
+        assert_eq!(
+            definitions(&v, &page),
+            [Some(status.clone()), Some(status), None],
+            "found by name, ignoring case; mood has no definition"
+        );
+    }
+
+    #[test]
+    fn defining_a_property_makes_its_entity_once() {
+        let (v, page, _) = page(&["mood:: calm"]);
+        assert_eq!(definitions(&v, &page), [None]);
+        let id = v.define_property("mood").unwrap();
+        let e = v.entity(&id).unwrap();
+        assert_eq!(e.title, "mood");
+        assert!(!e.renamable, "a property is identified by its name");
+        assert_eq!(texts(&e.blocks), ["type:: property", ""]);
+        assert_eq!(definitions(&v, &page), [Some(id.clone())]);
+        assert_eq!(v.define_property(" Mood ").unwrap(), id, "once");
+        assert_eq!(v.entities().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn defining_a_property_that_is_defined_changes_nothing() {
+        let v = view_with(|g| {
+            g.create_entity("Status", &[("type", text("property"))])
+                .unwrap();
+        });
+        let id = id_of(&v, "Status");
+        assert_eq!(v.define_property("status").unwrap(), id);
+        assert_eq!(v.entities().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_property_with_no_name_cannot_be_defined() {
+        let (v, _page, _) = page(&[]);
+        assert!(v.define_property("  ").is_err());
+        assert_eq!(v.entities().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn defining_a_property_is_one_undo_step() {
+        let (v, _page, _) = page(&[]);
+        v.graph().enable_undo();
+        v.define_property("mood").unwrap();
+        assert!(v.undo().unwrap());
+        assert_eq!(v.entities().unwrap().len(), 1);
+    }
+}
+
 mod undo {
     use super::*;
 

@@ -7,7 +7,7 @@ use quiddity_core::schema::{Typed, coerce};
 use quiddity_core::syntax::{
     Link, Property as Prop, PropertyStyle, Value, format_link, is_properties_block, parse_block,
 };
-use quiddity_core::{BlockId, Identity, Resolution, ensure_journal};
+use quiddity_core::{BlockId, Identity, Index, Resolution, ensure_journal};
 use serde::Serialize;
 
 use crate::{Error, Result, View};
@@ -41,6 +41,8 @@ pub struct Property {
     /// JavaScript counts in. For a line property, the whole line.
     pub start: usize,
     pub end: usize,
+    /// The entity that defines the property, if there is one.
+    pub definition: Option<String>,
 }
 
 /// A property's value, as written.
@@ -93,8 +95,11 @@ fn utf16_at(text: &str, byte: usize) -> usize {
     text[..byte].encode_utf16().count()
 }
 
-fn property(text: &str, p: &Prop) -> Property {
+fn property(text: &str, p: &Prop, index: &Index) -> Property {
     Property {
+        definition: index
+            .property_entity(&p.key)
+            .map(|id| index.canonical(id).to_string()),
         key: p.key.clone(),
         value: p.value.as_ref().map(property_value),
         inline: p.style == PropertyStyle::Inline,
@@ -256,6 +261,11 @@ impl View {
             };
             links.insert(key, target);
         }
+        let properties = parsed
+            .properties
+            .iter()
+            .map(|p| property(&text, p, &index))
+            .collect();
         drop(index);
         let children = self
             .graph
@@ -263,11 +273,6 @@ impl View {
             .into_iter()
             .map(|child| self.block(child, links))
             .collect::<Result<_>>()?;
-        let properties = parsed
-            .properties
-            .iter()
-            .map(|p| property(&text, p))
-            .collect();
         Ok(Block {
             id: id.to_string(),
             text,
