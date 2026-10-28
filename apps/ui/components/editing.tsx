@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useGraph } from "@/lib/use-graph";
 import type { Block, EntityId, LinkTarget } from "@/lib/model";
 import { EditingContext, useEditing, type Editing } from "./editing-context";
@@ -45,6 +45,27 @@ export function EditableOutline({
   const graph = useGraph();
   const [current, setCurrent] = useState<Editing["current"]>(null);
   const order = useMemo(() => flatten(blocks), [blocks]);
+  // Each block being edited, with its text from when editing began, so that
+  // saving can tell the links it gained from the ones it had.
+  const opened = useRef(new Map<string, string>());
+  const save = useCallback(
+    (id: string) => {
+      const before = opened.current.get(id);
+      opened.current.delete(id);
+      if (before === undefined) return;
+      try {
+        graph.commitBlock(id, before);
+      } catch {
+        // The block went in an undo, so there is nothing to save.
+      }
+    },
+    [graph],
+  );
+  // Leaving the page is leaving the block.
+  useEffect(
+    () => () => [...opened.current.keys()].forEach(save),
+    [entityId, save],
+  );
   const editing = useMemo<Editing>(
     () => ({
       graph,
@@ -53,14 +74,17 @@ export function EditableOutline({
       order,
       edit: (id, caret) => {
         graph.settle();
+        [...opened.current.keys()].filter((other) => other !== id).forEach(save);
+        if (!opened.current.has(id)) opened.current.set(id, graph.blockText(id));
         setCurrent({ id, caret });
       },
       stop: (id) => {
         graph.settle();
+        save(id);
         setCurrent((c) => (c?.id === id ? null : c));
       },
     }),
-    [graph, entityId, current, order],
+    [graph, entityId, current, order, save],
   );
   return (
     <EditingContext.Provider value={editing}>
