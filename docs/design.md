@@ -300,11 +300,22 @@ live in the iroh-blobs store, not in the Loro document.
 - Connections are authenticated QUIC. They use hole punching where possible and
   fall back to a relay; we can run our own relays.
 - Protocols are separated by ALPN:
-  - `quiddity/sync/1`: Loro version-vector exchange and updates
-  - `quiddity/presence/1`: ephemeral state such as cursors, selections and
-    "currently editing"
+  - `quiddity/sync/2`: Loro version-vector exchange and updates, and
+    presence on the same stream
   - iroh-blobs ALPN: binaries
 
+#### Presence
+
+Which blocks each device has open is ephemeral, so it is kept out of the
+graph, and so out of its history, and travels as messages on the sync
+connection. Each device owns a record of the blocks it has open and the
+devices it is directly connected to, and tells each peer about every live
+device the peer hasn't heard of, so records reach the whole connected
+network. A device is live if it is reachable over links that both ends
+list. A peer that drops therefore cuts off whatever hung from it, even if it
+never reports having lost its own connections. Liveness is the transport's
+own: iroh pings connections and closes quiet ones, so there are no
+timeouts of ours.
 ### Devices and pairing
 
 - The list of authorised devices is stored **in the graph**, as blocks of type
@@ -516,7 +527,7 @@ born:: 1970-01-01
   journal's own date. They are found on request, since that means reading every
   block. Disambiguation pages are as described above.
 - **Presence**: other devices or users editing the same block appear as
-  cursors, via the presence ALPN.
+  cursors, via presence messages on the sync connection.
 - Later: queries over properties, table and board views by type, and a
   plugin API.
 

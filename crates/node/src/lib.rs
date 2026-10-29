@@ -5,12 +5,15 @@
 //! local edit or by updates from one peer, every connection is flushed, so
 //! a peer in the middle relays between the others. The headless sync node
 //! is just a peer that is always on.
+//!
+//! The same connections carry presence: which blocks each device has open.
+//! It is kept in memory, apart from the graph.
 
 pub mod store;
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use iroh::endpoint::{Connection, ConnectionError, ReadError, RecvStream, SendStream, WriteError};
@@ -18,7 +21,9 @@ use iroh::protocol::{AcceptError, ProtocolHandler};
 use iroh::{Endpoint, EndpointAddr, EndpointId};
 use jiff::Timestamp;
 use quiddity_core::{Graph, Index, merge_duplicates};
-use quiddity_sync::{DecodeError, FrameError, FrameReader, Message, Session, State, write_frame};
+use quiddity_sync::{
+    DecodeError, FrameError, FrameReader, Message, Presence, Record, Session, State, write_frame,
+};
 use tokio::sync::watch;
 
 /// The protocol's name, negotiated when connecting.
@@ -83,15 +88,50 @@ struct Inner {
     allowed: Allowed,
     /// Bumped whenever the graph changes, so every connection flushes.
     changes: watch::Sender<u64>,
+    presence: Mutex<PresenceState>,
+    /// Bumped whenever presence changes, so every connection announces it.
+    presence_changes: watch::Sender<u64>,
+}
+
+#[derive(Debug)]
+struct PresenceState {
+    presence: Presence,
+    /// How many connections each connected device has. Two devices that
+    /// dial each other at once have two.
+    links: BTreeMap<String, usize>,
+}
+
+/// A connection that has been announced as a link in the presence network,
+/// and is withdrawn when the connection ends, however it ends.
+struct Link<'a> {
+    peer: &'a Peer,
+    device: Option<String>,
+}
+
+impl Drop for Link<'_> {
+    fn drop(&mut self) {
+        if let Some(device) = &self.device {
+            self.peer.disconnected(device);
+        }
+    }
 }
 
 impl Peer {
     /// A peer for `graph`, as the device `device` (its ID in the graph's
     /// device list: the endpoint ID, for a real device).
     pub fn new(graph: Graph, allowed: Allowed, device: impl Into<String>) -> Self {
+        let device = device.into();
+        // Later than any earlier run's, so that a restart's records
+        // outrank what peers remember (unless the clock has gone back).
+        let epoch = u64::try_from(Timestamp::now().as_microsecond()).unwrap_or(0);
         Self {
             inner: Arc::new(Inner {
-                device: device.into(),
+                presence: Mutex::new(PresenceState {
+                    presence: Presence::new(device.clone(), epoch),
+                    links: BTreeMap::new(),
+                }),
+                presence_changes: watch::Sender::new(0),
+                device,
                 graph,
                 allowed,
                 changes: watch::Sender::new(0),
@@ -106,6 +146,69 @@ impl Peer {
     /// Call after committing local edits, to send them to connected peers.
     pub fn changed(&self) {
         self.inner.changes.send_modify(|n| *n = n.wrapping_add(1));
+    }
+
+    /// Says which blocks this device has open, to every device it can reach.
+    pub fn set_focus<S: Into<String>>(&self, blocks: impl IntoIterator<Item = S>) {
+        let focus = blocks.into_iter().map(Into::into).collect();
+        self.presence().presence.set_focus(focus);
+        self.presence_changed();
+    }
+
+    /// Whether another device, one we are connected to or can reach through
+    /// those that are, has `block` open.
+    pub fn watched(&self, block: &str) -> bool {
+        self.presence().presence.watched(block)
+    }
+
+    /// The other devices that are here, and what they have open.
+    pub fn present(&self) -> Vec<Record> {
+        let state = self.presence();
+        state.presence.present().into_iter().cloned().collect()
+    }
+
+    /// Watches for changes to who is here and what they have open.
+    pub fn subscribe_presence(&self) -> watch::Receiver<u64> {
+        self.inner.presence_changes.subscribe()
+    }
+
+    fn presence(&self) -> MutexGuard<'_, PresenceState> {
+        self.inner
+            .presence
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn presence_changed(&self) {
+        self.inner
+            .presence_changes
+            .send_modify(|n| *n = n.wrapping_add(1));
+    }
+
+    fn connected(&self, device: &str) {
+        let mut state = self.presence();
+        *state.links.entry(device.to_owned()).or_default() += 1;
+        state.presence.connect(device);
+        drop(state);
+        self.presence_changed();
+    }
+
+    fn disconnected(&self, device: &str) {
+        let mut state = self.presence();
+        let remaining = state.links.get_mut(device).map_or(0, |n| {
+            *n -= 1;
+            *n
+        });
+        if remaining == 0 {
+            state.links.remove(device);
+            state.presence.disconnect(device);
+        } else {
+            // Another connection to the device is left, and doesn't know
+            // what the one that has gone was told: start it afresh.
+            state.presence.connect(device);
+        }
+        drop(state);
+        self.presence_changed();
     }
 
     /// Merges duplicate entities that arrived from different devices, and
@@ -149,6 +252,11 @@ impl Peer {
         let graph = self.graph();
         let mut session = Session::new(self.inner.device.clone());
         let mut changes = self.subscribe();
+        let mut presence_changes = self.subscribe_presence();
+        let mut link = Link {
+            peer: self,
+            device: None,
+        };
         let mut reader = FrameReader::new();
         let mut buf = vec![0u8; 64 * 1024];
         write(&mut send, &session.hello(graph)).await?;
@@ -172,6 +280,13 @@ impl Peer {
                             Err(DecodeError::UnknownType(_)) => continue,
                             Err(e) => return Err(e.into()),
                         };
+                        if let Message::Presence(record) = message {
+                            if let Some(device) = &link.device {
+                                self.presence().presence.receive(device, record);
+                                self.presence_changed();
+                            }
+                            continue;
+                        }
                         let is_updates = matches!(message, Message::Updates(_));
                         for reply in session.receive(graph, message, Timestamp::now())? {
                             write(&mut send, &reply).await?;
@@ -182,8 +297,26 @@ impl Peer {
                             State::PeerBehind => return Err(Error::PeerBehind),
                             State::Starting | State::Syncing => {}
                         }
+                        if link.device.is_none()
+                            && *session.state() == State::Syncing
+                            && let Some(device) = session.peer()
+                        {
+                            self.connected(device);
+                            link.device = Some(device.to_owned());
+                        }
                         if is_updates {
                             self.changed();
+                        }
+                    }
+                }
+                changed = presence_changes.changed() => {
+                    if changed.is_err() {
+                        return Ok(());
+                    }
+                    if let Some(device) = &link.device {
+                        let records = self.presence().presence.outgoing(device);
+                        for record in records {
+                            write(&mut send, &Message::Presence(record)).await?;
                         }
                     }
                 }

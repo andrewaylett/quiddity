@@ -1,4 +1,8 @@
+use std::collections::BTreeSet;
+
 use quiddity_core::Version;
+
+use crate::Record;
 
 /// One protocol message. Messages are framed by the transport, so each is
 /// encoded without its own length.
@@ -21,11 +25,15 @@ pub enum Message {
     /// A whole graph, for a blank peer that can't be brought up to date
     /// with updates because the sender's history has been compacted.
     Snapshot(Vec<u8>),
+    /// A device's presence record, for a peer that has yet to be told of it
+    /// (see [`crate::Presence`]).
+    Presence(Record),
 }
 
 const HELLO: u8 = 1;
 const UPDATES: u8 = 2;
 const SNAPSHOT: u8 = 3;
+const PRESENCE: u8 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
@@ -63,6 +71,15 @@ impl Message {
             }
             Message::Updates(bytes) => tagged(UPDATES, bytes),
             Message::Snapshot(bytes) => tagged(SNAPSHOT, bytes),
+            Message::Presence(record) => {
+                let mut out = vec![PRESENCE];
+                out.extend_from_slice(&record.epoch.to_le_bytes());
+                out.extend_from_slice(&record.seq.to_le_bytes());
+                put(&mut out, record.device.as_bytes());
+                put_set(&mut out, &record.peers);
+                put_set(&mut out, &record.focus);
+                out
+            }
         }
     }
 
@@ -96,6 +113,23 @@ impl Message {
             }
             UPDATES => Ok(Message::Updates(rest.to_vec())),
             SNAPSHOT => Ok(Message::Snapshot(rest.to_vec())),
+            PRESENCE => {
+                let (epoch, rest) = take_u64(rest)?;
+                let (seq, rest) = take_u64(rest)?;
+                let (device, rest) = take_string(rest)?;
+                let (peers, rest) = take_set(rest)?;
+                let (focus, rest) = take_set(rest)?;
+                if !rest.is_empty() {
+                    return Err(DecodeError::Malformed);
+                }
+                Ok(Message::Presence(Record {
+                    device,
+                    epoch,
+                    seq,
+                    peers,
+                    focus,
+                }))
+            }
             other => Err(DecodeError::UnknownType(other)),
         }
     }
@@ -123,4 +157,42 @@ fn take(bytes: &[u8]) -> Result<(&[u8], &[u8]), DecodeError> {
     let len = u32::from_le_bytes(*len) as usize;
     let field = rest.get(..len).ok_or(DecodeError::Malformed)?;
     Ok((field, &rest[len..]))
+}
+
+fn take_u64(bytes: &[u8]) -> Result<(u64, &[u8]), DecodeError> {
+    let (n, rest) = bytes
+        .split_first_chunk::<8>()
+        .ok_or(DecodeError::Malformed)?;
+    Ok((u64::from_le_bytes(*n), rest))
+}
+
+fn take_string(bytes: &[u8]) -> Result<(String, &[u8]), DecodeError> {
+    let (field, rest) = take(bytes)?;
+    let field = String::from_utf8(field.to_vec()).map_err(|_| DecodeError::Malformed)?;
+    Ok((field, rest))
+}
+
+/// Appends a set of strings: a little-endian `u32` count, then each as by
+/// [`put`].
+fn put_set(out: &mut Vec<u8>, set: &BTreeSet<String>) {
+    let len = u32::try_from(set.len()).expect("sets are under 4 billion");
+    out.extend_from_slice(&len.to_le_bytes());
+    for item in set {
+        put(out, item.as_bytes());
+    }
+}
+
+/// Reads a set written by [`put_set`].
+fn take_set(bytes: &[u8]) -> Result<(BTreeSet<String>, &[u8]), DecodeError> {
+    let (len, mut rest) = bytes
+        .split_first_chunk::<4>()
+        .ok_or(DecodeError::Malformed)?;
+    let len = u32::from_le_bytes(*len) as usize;
+    let mut set = BTreeSet::new();
+    for _ in 0..len {
+        let (item, after) = take_string(rest)?;
+        set.insert(item);
+        rest = after;
+    }
+    Ok((set, rest))
 }

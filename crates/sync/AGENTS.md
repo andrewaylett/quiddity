@@ -32,6 +32,10 @@ The sync protocol, independent of transport: a `Session` per connection,
   are therefore never forgotten, and liveness is computed: reachable over
   links that **both** ends list, so a crashed device's stale claim can't keep
   it alive. No timeouts: the transport's own connection loss is the signal.
+- **`Message::Presence` is not a session's business**: `Session::receive`
+  ignores it, and the node routes it between connections, because presence
+  belongs to the device and not to one connection. `Session::peer` gives the
+  device ID from the hello that presence is keyed by.
 - **Unknown message types are ignored** by the caller (`quiddity-node`), so
   newer peers can add messages. `decode` reports them as `UnknownType`.
 - **Frames are capped at `MAX_FRAME`** (256 MiB), checked before buffering.

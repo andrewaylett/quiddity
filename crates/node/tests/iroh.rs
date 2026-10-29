@@ -219,3 +219,92 @@ async fn unlisted_devices_are_refused() {
     node_router.shutdown().await.unwrap();
     stranger_router.shutdown().await.unwrap();
 }
+
+/// Waits until `condition` holds.
+async fn eventually(what: &str, condition: impl Fn() -> bool) {
+    let wait = async {
+        while !condition() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(10), wait)
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+}
+
+/// Devices that only meet through a node still see each other's blocks, and
+/// stop seeing them when the device goes, though it never says so.
+#[tokio::test]
+async fn presence_reaches_devices_through_a_node_and_goes_with_them() {
+    let node = Peer::new(Graph::new(), Allowed::Any, "node");
+    let phone = Peer::new(Graph::blank(), Allowed::Any, "phone");
+    let laptop = Peer::new(Graph::blank(), Allowed::Any, "laptop");
+    let (node_router, node_addr) = listen(&node).await;
+    let (phone_router, _) = listen(&phone).await;
+    let (laptop_router, _) = listen(&laptop).await;
+
+    let mut tasks = Vec::new();
+    for (peer, router) in [(&phone, &phone_router), (&laptop, &laptop_router)] {
+        let (peer, endpoint, addr) = (peer.clone(), router.endpoint().clone(), node_addr.clone());
+        tasks.push(tokio::spawn(async move {
+            peer.connect(&endpoint, addr, None).await
+        }));
+    }
+
+    phone.set_focus(["block-1"]);
+    eventually("the node to see the phone's block", || {
+        node.watched("block-1")
+    })
+    .await;
+    eventually("the laptop to see it too", || laptop.watched("block-1")).await;
+    assert!(!phone.watched("block-1"), "nobody else has it open");
+    assert_eq!(laptop.present().len(), 2, "the node and the phone");
+
+    phone.set_focus(["block-2"]);
+    eventually("the move to arrive", || {
+        laptop.watched("block-2") && !laptop.watched("block-1")
+    })
+    .await;
+
+    // The phone vanishes; only the node notices.
+    tasks[0].abort();
+    phone_router.shutdown().await.unwrap();
+    eventually("the laptop to forget the phone", || {
+        !laptop.watched("block-2") && laptop.present().len() == 1
+    })
+    .await;
+
+    tasks[1].abort();
+    node_router.shutdown().await.unwrap();
+    laptop_router.shutdown().await.unwrap();
+}
+
+/// Devices that dial each other at once have two connections. Presence
+/// survives the loss of one.
+#[tokio::test]
+async fn presence_survives_one_of_two_connections_closing() {
+    let a = Peer::new(Graph::new(), Allowed::Any, "a");
+    let b = Peer::new(Graph::blank(), Allowed::Any, "b");
+    let (a_router, a_addr) = listen(&a).await;
+    let (b_router, b_addr) = listen(&b).await;
+
+    let dial = |from: &Peer, router: &Router, to: EndpointAddr| {
+        let (peer, endpoint) = (from.clone(), router.endpoint().clone());
+        tokio::spawn(async move { peer.connect(&endpoint, to, None).await })
+    };
+    let first = dial(&b, &b_router, a_addr);
+    let second = dial(&a, &a_router, b_addr);
+
+    a.set_focus(["x"]);
+    eventually("b to see a's block", || b.watched("x")).await;
+
+    first.abort();
+    // The first connection's end is noticed, and the second carries on:
+    // a change made afterwards still arrives.
+    a.set_focus(["y"]);
+    eventually("the change to arrive", || b.watched("y") && !b.watched("x")).await;
+
+    second.abort();
+    a_router.shutdown().await.unwrap();
+    b_router.shutdown().await.unwrap();
+}
