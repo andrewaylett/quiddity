@@ -21,6 +21,16 @@ Sync over iroh (`Peer`), the on-disk `Store`, and the `quiddity-node` CLI.
 - **A device behind its peer's history** gets `Error::Behind`. The side
   that finds its peer behind closes with code `BEHIND`, so the other can say
   why even if the close arrives before the peer's hello is read.
+- **Presence rides the sync connection** (`Peer::set_focus`, `watched`,
+  `present`). A connection becomes a presence link once the peer's hello has
+  arrived, and is withdrawn when its task ends, however it ends (`Link`
+  drops, so a cancelled task counts). Two devices that dial each other at
+  once have two connections, so links are counted, and the survivor starts
+  afresh when one goes. A device that vanishes is noticed only when iroh
+  gives up on its connection (keepalive 5 s, then the idle timeout): there
+  are no timers of ours, so don't lengthen those without thinking about it.
+  Epochs come from the clock, so a clock set back can leave a restarted
+  device's records ignored.
 - **`--local ADDR`** binds to that address only, with no relays or address
   lookup. The tests use it on `127.0.0.1:0`, and iroh tests use
   `presets::Minimal` with relays disabled, so nothing leaves the machine.

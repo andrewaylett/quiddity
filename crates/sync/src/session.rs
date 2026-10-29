@@ -39,6 +39,8 @@ pub enum State {
 pub struct Session {
     /// This device's ID in the graph's device list.
     device: String,
+    /// The peer's device ID, once its hello has arrived.
+    peer: Option<String>,
     state: State,
     /// Everything the peer is known to have: what it said it had, plus
     /// everything sent to it or received from it since.
@@ -49,6 +51,7 @@ impl Session {
     pub fn new(device: impl Into<String>) -> Self {
         Self {
             device: device.into(),
+            peer: None,
             state: State::Starting,
             theirs: Version::default(),
         }
@@ -56,6 +59,11 @@ impl Session {
 
     pub fn state(&self) -> &State {
         &self.state
+    }
+
+    /// The peer's device ID, once its hello has arrived.
+    pub fn peer(&self) -> Option<&str> {
+        self.peer.as_deref()
     }
 
     /// The message to send as soon as the connection is up.
@@ -88,6 +96,7 @@ impl Session {
                 start,
                 version,
             } => {
+                self.peer = Some(device.clone());
                 let readable = |s: Option<i64>| s.is_none_or(|s| s == SCHEMA_VERSION);
                 if !readable(schema) || !readable(graph.schema_version()) {
                     self.state = State::Incompatible { theirs: schema };
@@ -112,6 +121,9 @@ impl Session {
                 self.theirs = version;
                 Ok(self.flush(graph)?.into_iter().collect())
             }
+            // Presence is a device's business, not a session's: the caller
+            // routes it between connections.
+            Message::Presence(_) => Ok(Vec::new()),
             Message::Updates(_) | Message::Snapshot(_) if self.state == State::Starting => {
                 Err(Error::UpdatesBeforeHello)
             }
@@ -227,6 +239,34 @@ mod tests {
             now(),
         )?;
         assert_eq!(session.state(), &State::Syncing);
+        Ok(())
+    }
+
+    #[test]
+    fn the_peer_is_known_from_its_hello() -> Result<(), Error> {
+        let mut session = Session::new("me");
+        assert_eq!(session.peer(), None);
+        let graph = Graph::new();
+        session.receive(&graph, hello(None, &graph), now())?;
+        assert_eq!(session.peer(), Some("peer"));
+        Ok(())
+    }
+
+    #[test]
+    fn presence_is_left_to_the_caller() -> Result<(), Error> {
+        let (graph, mut session) = (Graph::new(), Session::new("me"));
+        let record = Message::Presence(crate::Record {
+            device: "peer".into(),
+            epoch: 1,
+            seq: 1,
+            peers: Default::default(),
+            focus: Default::default(),
+        });
+        // Not an error before the hello, and no reply either way.
+        assert!(session.receive(&graph, record.clone(), now())?.is_empty());
+        assert_eq!(session.state(), &State::Starting);
+        session.receive(&graph, hello(None, &graph), now())?;
+        assert!(session.receive(&graph, record, now())?.is_empty());
         Ok(())
     }
 

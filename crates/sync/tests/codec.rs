@@ -1,10 +1,10 @@
 //! Messages and frames survive encoding, and frames survive arriving in
 //! arbitrary pieces. Decoding arbitrary bytes is fuzzed in `fuzz/`.
 
-use proptest::collection::vec;
+use proptest::collection::{btree_set, vec};
 use proptest::prelude::*;
 use quiddity_core::{Graph, Version};
-use quiddity_sync::{FrameError, FrameReader, MAX_FRAME, Message, write_frame};
+use quiddity_sync::{FrameError, FrameReader, MAX_FRAME, Message, Record, write_frame};
 
 /// A real version: from a graph that has seen edits from several peers.
 fn version() -> impl Strategy<Value = Version> {
@@ -39,6 +39,22 @@ fn message() -> impl Strategy<Value = Message> {
             }),
         vec(any::<u8>(), 0..64).prop_map(Message::Updates),
         vec(any::<u8>(), 0..64).prop_map(Message::Snapshot),
+        (
+            any::<String>(),
+            any::<u64>(),
+            any::<u64>(),
+            btree_set(any::<String>(), 0..4),
+            btree_set(any::<String>(), 0..4)
+        )
+            .prop_map(
+                |(device, epoch, seq, peers, focus)| Message::Presence(Record {
+                    device,
+                    epoch,
+                    seq,
+                    peers,
+                    focus,
+                })
+            ),
     ]
 }
 
@@ -99,4 +115,36 @@ fn oversized_frames_are_refused_before_buffering() {
         reader.push(&header(len));
         assert_eq!(reader.next_frame(), Ok(None), "{len}");
     }
+}
+
+/// Presence is read exactly: a count the bytes can't hold, or bytes left
+/// over, are refused rather than believed. (A huge count costs nothing: reading
+/// stops at the first item that isn't there.)
+#[test]
+fn presence_is_read_exactly() {
+    let record = Record {
+        device: "d".into(),
+        epoch: 1,
+        seq: 2,
+        peers: ["p".to_owned()].into(),
+        focus: Default::default(),
+    };
+    let good = Message::Presence(record).encode();
+    assert!(Message::decode(&good).is_ok());
+
+    let mut extra = good.clone();
+    extra.push(0);
+    assert_eq!(
+        Message::decode(&extra),
+        Err(quiddity_sync::DecodeError::Malformed)
+    );
+
+    // The peers' count, claiming far more than follows.
+    let count_at = 1 + 8 + 8 + 4 + 1;
+    let mut greedy = good;
+    greedy[count_at..count_at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert_eq!(
+        Message::decode(&greedy),
+        Err(quiddity_sync::DecodeError::Malformed)
+    );
 }
