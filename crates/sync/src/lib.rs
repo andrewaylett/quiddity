@@ -21,8 +21,10 @@
 
 mod frame;
 mod message;
+mod presence;
 mod session;
 
 pub use frame::{FrameError, FrameReader, MAX_FRAME, write_frame};
 pub use message::{DecodeError, Message};
+pub use presence::{Presence, Record};
 pub use session::{Error, Session, State};

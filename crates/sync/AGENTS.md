@@ -22,6 +22,16 @@ The sync protocol, independent of transport: a `Session` per connection,
 - **The session vouches** for a peer it hasn't heard of (see core's
   `vouch_for`), if it has anything to give. That's why `receive` takes the
   time. A blank replica doesn't.
+- **Presence is not in the graph.** `Presence` (`presence.rs`) is ephemeral
+  and kept apart so it leaves no history. Each device owns a `Record` (blocks
+  open, devices connected to), ordered by (epoch, seq) so a restart outranks
+  its past. Gossip works like `Session::flush`: per connected peer, `outgoing`
+  sends the live records it hasn't been told. Forwarding "whatever is news"
+  does not work: a neighbour that already holds a record never passes it on,
+  so a device that forgot it, or never had it, never hears it again. Records
+  are therefore never forgotten, and liveness is computed: reachable over
+  links that **both** ends list, so a crashed device's stale claim can't keep
+  it alive. No timeouts: the transport's own connection loss is the signal.
 - **Unknown message types are ignored** by the caller (`quiddity-node`), so
   newer peers can add messages. `decode` reports them as `UnknownType`.
 - **Frames are capped at `MAX_FRAME`** (256 MiB), checked before buffering.
