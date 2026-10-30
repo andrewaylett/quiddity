@@ -121,7 +121,11 @@ The action strip above the main pane holds the search button; **Cmd/Ctrl-K**
 - **Matching lives in Rust** (`quiddity-view`'s `search.rs`, where it is
   mutation-tested), reached through `graph.searchTitles`. Facets only shape
   its answers into hits.
-- The graph's `searchTitles` isn't cached: the panel asks per keystroke and
+- **The Text facet** (`search_text`) is BM25 over every block: all the words
+  must be there and the last may be unfinished, so `note` finds `notes` while
+  `not loro` doesn't. It shows the stretch of the block around the first match.
+  An entity's own name belongs to the Pages facet, not this one.
+- The graph's `searchTitles` and `searchText` aren't cached: the panel asks per keystroke and
   an answer is rarely wanted twice.
 
 ## Rendering

@@ -1,5 +1,6 @@
 import init, { Replica } from "./wasm/quiddity_wasm";
 import type {
+  BlockHit,
   Connections,
   Entity,
   EntityId,
@@ -98,6 +99,10 @@ export class Graph {
    * rarely asked twice, and the answer needn't be stable between edits. */
   searchTitles = (query: string, limit: number) =>
     this.replica.searchTitles(query, limit) as TitleHit[];
+
+  /** Blocks whose text matches `query`, best first. Not kept, as above. */
+  searchText = (query: string, limit: number) =>
+    this.replica.searchText(query, limit) as BlockHit[];
 
   /** A block's text as it is now, which a rendered view may lag behind. */
   blockText = (id: string) => this.replica.blockText(id);

@@ -79,3 +79,14 @@ export interface TitleHit {
   /** The matched text in the title, as ascending `[start, end)` runs of UTF-16 units. */
   ranges: [number, number][];
 }
+
+/** A block whose text matched a search. */
+export interface BlockHit {
+  /** The entity the block is on. */
+  entity: EntityRef;
+  block: string;
+  text: string;
+  score: number;
+  /** The words that matched, as ascending `[start, end)` runs of `text` in UTF-16 units. */
+  ranges: [number, number][];
+}

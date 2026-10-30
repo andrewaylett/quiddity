@@ -3,12 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { limited, type Facet, type Hit } from "@/lib/search/facet";
+import { text } from "@/lib/search/text";
 import { titles } from "@/lib/search/titles";
 import { useSearch } from "@/lib/search/use-search";
 import { useView } from "./use-view";
 
 /** The sections of the panel, in order. New kinds of search are added here. */
-const facets: Facet[] = [limited(8, titles)];
+const facets: Facet[] = [limited(8, titles), limited(8, text)];
 
 const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -166,9 +167,9 @@ function Panel({ onClose }: { onClose: () => void }) {
                     >
                       <Highlighted hit={hit} />
                       {hit.detail && (
-                        <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+                        <div className="truncate text-xs text-slate-500 dark:text-slate-400">
                           {hit.detail}
-                        </span>
+                        </div>
                       )}
                     </div>
                   );

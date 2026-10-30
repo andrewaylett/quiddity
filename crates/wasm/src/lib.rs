@@ -92,6 +92,12 @@ impl Replica {
         js(&self.view.search_titles(query, limit)?)
     }
 
+    /// Blocks whose text matches `query`, best first.
+    #[wasm_bindgen(js_name = searchText)]
+    pub fn search_text(&self, query: &str, limit: usize) -> Result<JsValue, JsError> {
+        js(&self.view.search_text(query, limit)?)
+    }
+
     /// Every entity and the links between them, for drawing as a graph.
     pub fn connections(&self) -> Result<JsValue, JsError> {
         js(&self.view.connections()?)

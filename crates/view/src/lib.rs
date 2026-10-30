@@ -7,6 +7,7 @@
 //! to WASM (`quiddity-wasm`), so every replica answers from its own copy.
 
 mod edit;
+mod fts;
 mod links;
 mod query;
 mod search;
@@ -16,6 +17,7 @@ use std::cell::{Cell, Ref, RefCell};
 use quiddity_core::{BlockId, Graph, Index};
 
 pub use edit::Merged;
+pub use fts::BlockHit;
 pub use query::{
     Block, Connections, Edge, Entity, EntityRef, LinkTarget, Property, PropertyValue, Reference,
 };
