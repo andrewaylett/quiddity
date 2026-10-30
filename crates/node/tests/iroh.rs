@@ -308,3 +308,148 @@ async fn presence_survives_one_of_two_connections_closing() {
     a_router.shutdown().await.unwrap();
     b_router.shutdown().await.unwrap();
 }
+
+/// Two connected devices that have converged, with the phone's edits held
+/// for `idle` unless something sooner sends them.
+async fn connected_pair(idle: Duration) -> (Peer, Peer, Vec<Router>, tokio::task::JoinHandle<()>) {
+    let laptop = Peer::new(Graph::new(), Allowed::Any, "laptop");
+    let phone = Peer::new(Graph::blank(), Allowed::Any, "phone");
+    phone.set_edit_idle(idle);
+    let (laptop_router, laptop_addr) = listen(&laptop).await;
+    let (phone_router, _) = listen(&phone).await;
+    let (dialer, endpoint) = (phone.clone(), phone_router.endpoint().clone());
+    let task = tokio::spawn(async move {
+        let _ = dialer.connect(&endpoint, laptop_addr, None).await;
+    });
+    converged(&[&laptop, &phone]).await;
+    eventually("the devices to see each other", || {
+        phone.present().len() == 1 && laptop.present().len() == 1
+    })
+    .await;
+    (laptop, phone, vec![laptop_router, phone_router], task)
+}
+
+/// Types into the phone, as the view will: committed, saved, and announced
+/// as an edit.
+fn type_into(phone: &Peer, block: &str, text: &str) {
+    phone.graph().create_block(None, None, text).unwrap();
+    phone.graph().commit();
+    phone.edited(block);
+}
+
+async fn shut_down(routers: Vec<Router>, task: tokio::task::JoinHandle<()>) {
+    task.abort();
+    for router in routers {
+        router.shutdown().await.unwrap();
+    }
+}
+
+/// How long to give a held edit to (wrongly) turn up.
+const SETTLE: Duration = Duration::from_millis(500);
+
+#[tokio::test]
+async fn edits_nobody_is_watching_wait_until_the_edit_is_over() {
+    let (laptop, phone, routers, task) = connected_pair(Duration::from_millis(1500)).await;
+    let saved = phone.subscribe();
+
+    type_into(&phone, "blk", "typed");
+    assert!(saved.has_changed().unwrap(), "saving isn't held back");
+    tokio::time::sleep(SETTLE).await;
+    assert!(laptop.graph().roots().is_empty(), "held back while typing");
+
+    // More typing moves the deadline, which is the idle time since the
+    // last: the first deadline (1.5 s) passes with the edit still held.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    type_into(&phone, "blk", "more");
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert!(
+        laptop.graph().roots().is_empty(),
+        "1 s since the latest typing, and 1.5 s to wait"
+    );
+
+    converged(&[&laptop, &phone]).await;
+    assert_eq!(laptop.graph().roots().len(), 2, "sent once typing stopped");
+    shut_down(routers, task).await;
+}
+
+#[tokio::test]
+async fn edits_in_a_block_someone_has_open_are_sent_at_once() {
+    let (laptop, phone, routers, task) = connected_pair(Duration::from_secs(60)).await;
+    laptop.set_focus(["blk"]);
+    eventually("the phone to see it", || phone.watched("blk")).await;
+
+    type_into(&phone, "blk", "typed");
+    converged(&[&laptop, &phone]).await;
+    assert_eq!(laptop.graph().roots().len(), 1);
+
+    // A block nobody has open is still held.
+    type_into(&phone, "elsewhere", "private");
+    tokio::time::sleep(SETTLE).await;
+    assert_eq!(laptop.graph().roots().len(), 1);
+    shut_down(routers, task).await;
+}
+
+#[tokio::test]
+async fn held_edits_are_sent_when_someone_opens_the_block() {
+    let (laptop, phone, routers, task) = connected_pair(Duration::from_secs(60)).await;
+    type_into(&phone, "blk", "typed");
+    tokio::time::sleep(SETTLE).await;
+    assert!(laptop.graph().roots().is_empty());
+
+    laptop.set_focus(["blk"]);
+    converged(&[&laptop, &phone]).await;
+    assert_eq!(laptop.graph().roots().len(), 1);
+    shut_down(routers, task).await;
+}
+
+#[tokio::test]
+async fn moving_to_another_block_ends_the_edit() {
+    let (laptop, phone, routers, task) = connected_pair(Duration::from_secs(60)).await;
+    phone.set_focus(["blk"]);
+    type_into(&phone, "blk", "typed");
+    phone.set_focus(["blk", "other"]);
+    tokio::time::sleep(SETTLE).await;
+    assert!(laptop.graph().roots().is_empty(), "still in the block");
+
+    phone.set_focus(["other"]);
+    converged(&[&laptop, &phone]).await;
+    assert_eq!(laptop.graph().roots().len(), 1);
+    shut_down(routers, task).await;
+}
+
+#[tokio::test]
+async fn other_changes_and_ending_the_edit_send_what_is_held() {
+    let (laptop, phone, routers, task) = connected_pair(Duration::from_secs(60)).await;
+    type_into(&phone, "blk", "typed");
+    phone.end_edit();
+    converged(&[&laptop, &phone]).await;
+
+    // Anything else that calls `changed` sends the lot, and the edit is over.
+    type_into(&phone, "blk", "typed again");
+    phone
+        .graph()
+        .create_block(None, None, "structural")
+        .unwrap();
+    phone.graph().commit();
+    phone.changed();
+    converged(&[&laptop, &phone]).await;
+    assert_eq!(laptop.graph().roots().len(), 3);
+
+    // Nothing is left pending: ending the edit again changes nothing, and
+    // the next typing is held afresh.
+    type_into(&phone, "blk", "and again");
+    tokio::time::sleep(SETTLE).await;
+    assert_eq!(laptop.graph().roots().len(), 3);
+    shut_down(routers, task).await;
+}
+
+#[tokio::test]
+async fn the_idle_time_is_the_one_set() {
+    // Well under the default of two seconds.
+    let (laptop, phone, routers, task) = connected_pair(Duration::from_millis(100)).await;
+    type_into(&phone, "blk", "typed");
+    let both = [&laptop, &phone];
+    let arrived = tokio::time::timeout(Duration::from_secs(1), converged(&both)).await;
+    assert!(arrived.is_ok(), "sent after 100 ms, not the default");
+    shut_down(routers, task).await;
+}

@@ -31,6 +31,19 @@ Sync over iroh (`Peer`), the on-disk `Store`, and the `quiddity-node` CLI.
   are no timers of ours, so don't lengthen those without thinking about it.
   Epochs come from the clock, so a clock set back can leave a restarted
   device's records ignored.
+- **Typing is not streamed to devices that can't see it.** Three signals
+  with three jobs: `changes` (`subscribe`) fires on every graph change and
+  drives saving, so saving is never held back; `publish` makes connections
+  flush; `gate_changes` only makes them re-read the gate's deadline. A local
+  edit reported with `edited(block)` publishes at once if another device has
+  that block open, and otherwise waits, with whatever follows, until the
+  edit ends: `edit_idle` (2 s) after the latest, this device leaving the
+  block (`set_focus`), `end_edit`, someone opening the block, or any
+  `changed()`. Loro keeps every op however often we publish, so time travel
+  is unaffected: only when peers hear differs. The op log is linear, so a
+  publish sends everything up to that point, not just the watched block. A
+  connection's hello still sends everything, held edits included. The
+  timers live in the connection tasks, so there is nothing to spawn.
 - **`--local ADDR`** binds to that address only, with no relays or address
   lookup. The tests use it on `127.0.0.1:0`, and iroh tests use
   `presets::Minimal` with relays disabled, so nothing leaves the machine.
