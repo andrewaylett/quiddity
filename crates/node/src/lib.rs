@@ -8,10 +8,13 @@
 //!
 //! The same connections carry presence: which blocks each device has open.
 //! It is kept in memory, apart from the graph.
+//!
+//! Typing is not sent keystroke by keystroke to devices that can't see it:
+//! see [`Peer::edited`].
 
 pub mod store;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -28,6 +31,9 @@ use tokio::sync::watch;
 
 /// The protocol's name, negotiated when connecting.
 pub const ALPN: &[u8] = b"quiddity/sync/2";
+
+/// How long after the last keystroke an edit nobody is watching is sent.
+const EDIT_IDLE: Duration = Duration::from_secs(2);
 
 /// The code a device closes a connection with when the peer is behind its
 /// history, so the peer can say why rather than that the connection went.
@@ -86,11 +92,27 @@ struct Inner {
     device: String,
     graph: Graph,
     allowed: Allowed,
-    /// Bumped whenever the graph changes, so every connection flushes.
+    /// Bumped whenever the graph changes, so that it is saved.
     changes: watch::Sender<u64>,
+    /// Bumped when the changes so far are to be sent, so every connection
+    /// flushes. It follows `changes` except while edits are held back.
+    publish: watch::Sender<u64>,
+    gate: Mutex<Gate>,
+    /// Bumped when the gate's deadline moves, so connections re-read it.
+    gate_changes: watch::Sender<u64>,
     presence: Mutex<PresenceState>,
     /// Bumped whenever presence changes, so every connection announces it.
     presence_changes: watch::Sender<u64>,
+}
+
+/// Edits held back because nobody else has their block open.
+#[derive(Debug)]
+struct Gate {
+    /// The blocks with edits that have not been sent.
+    pending: BTreeSet<String>,
+    /// When they are sent regardless: `idle` after the latest edit.
+    deadline: Option<tokio::time::Instant>,
+    idle: Duration,
 }
 
 #[derive(Debug)]
@@ -131,6 +153,13 @@ impl Peer {
                     links: BTreeMap::new(),
                 }),
                 presence_changes: watch::Sender::new(0),
+                gate: Mutex::new(Gate {
+                    pending: BTreeSet::new(),
+                    deadline: None,
+                    idle: EDIT_IDLE,
+                }),
+                gate_changes: watch::Sender::new(0),
+                publish: watch::Sender::new(0),
                 device,
                 graph,
                 allowed,
@@ -143,16 +172,95 @@ impl Peer {
         &self.inner.graph
     }
 
-    /// Call after committing local edits, to send them to connected peers.
+    /// Call after committing local changes, to send them, and any edits
+    /// still held back (see [`Peer::edited`]), to connected peers now.
     pub fn changed(&self) {
-        self.inner.changes.send_modify(|n| *n = n.wrapping_add(1));
+        bump(&self.inner.changes);
+        self.publish_now();
+    }
+
+    /// Call after committing an edit to the text of `block`, typing say,
+    /// which many follow one another. It is saved at once, but sent to
+    /// connected devices only if one of them has the block open. Otherwise
+    /// it waits, with whatever follows it, until the edit has ended: no
+    /// further edit for [`Peer::set_edit_idle`], this device moving to
+    /// another block ([`Peer::set_focus`]), [`Peer::end_edit`], or anything
+    /// that calls [`Peer::changed`]. The history is the same either way:
+    /// it is when it is sent that differs.
+    pub fn edited(&self, block: impl Into<String>) {
+        bump(&self.inner.changes);
+        {
+            let mut gate = self.gate();
+            gate.pending.insert(block.into());
+            gate.deadline = Some(tokio::time::Instant::now() + gate.idle);
+        }
+        if self.pending_watched() {
+            self.publish_now();
+        } else {
+            bump(&self.inner.gate_changes);
+        }
+    }
+
+    /// The edit in progress has ended (the caret has gone, say): send what
+    /// was held back.
+    pub fn end_edit(&self) {
+        if !self.gate().pending.is_empty() {
+            self.publish_now();
+        }
+    }
+
+    /// How long after the latest edit an unwatched one is sent regardless.
+    pub fn set_edit_idle(&self, idle: Duration) {
+        self.gate().idle = idle;
+    }
+
+    fn gate(&self) -> MutexGuard<'_, Gate> {
+        self.inner
+            .gate
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Whether another device has a block open that has held edits.
+    fn pending_watched(&self) -> bool {
+        let pending = self.gate().pending.clone();
+        let state = self.presence();
+        pending.iter().any(|block| state.presence.watched(block))
+    }
+
+    /// Sends whatever has been held back, and everything else.
+    fn publish_now(&self) {
+        {
+            let mut gate = self.gate();
+            gate.pending.clear();
+            gate.deadline = None;
+        }
+        bump(&self.inner.gate_changes);
+        bump(&self.inner.publish);
+    }
+
+    /// The deadline has passed, unless more edits have moved it.
+    fn publish_if_due(&self) {
+        let due = self
+            .gate()
+            .deadline
+            .is_some_and(|d| d <= tokio::time::Instant::now());
+        if due {
+            self.publish_now();
+        }
     }
 
     /// Says which blocks this device has open, to every device it can reach.
+    ///
+    /// Moving away from a block ends any edit held back in it.
     pub fn set_focus<S: Into<String>>(&self, blocks: impl IntoIterator<Item = S>) {
-        let focus = blocks.into_iter().map(Into::into).collect();
+        let focus: BTreeSet<String> = blocks.into_iter().map(Into::into).collect();
+        let left = self.gate().pending.iter().any(|b| !focus.contains(b));
         self.presence().presence.set_focus(focus);
         self.presence_changed();
+        if left {
+            self.publish_now();
+        }
     }
 
     /// Whether another device, one we are connected to or can reach through
@@ -179,10 +287,13 @@ impl Peer {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// Announces a change to presence. If it puts someone in a block with
+    /// held edits, they are sent.
     fn presence_changed(&self) {
-        self.inner
-            .presence_changes
-            .send_modify(|n| *n = n.wrapping_add(1));
+        bump(&self.inner.presence_changes);
+        if self.pending_watched() {
+            self.publish_now();
+        }
     }
 
     fn connected(&self, device: &str) {
@@ -251,7 +362,8 @@ impl Peer {
     ) -> Result<(), Error> {
         let graph = self.graph();
         let mut session = Session::new(self.inner.device.clone());
-        let mut changes = self.subscribe();
+        let mut publish = self.inner.publish.subscribe();
+        let mut gate_changes = self.inner.gate_changes.subscribe();
         let mut presence_changes = self.subscribe_presence();
         let mut link = Link {
             peer: self,
@@ -262,6 +374,14 @@ impl Peer {
         write(&mut send, &session.hello(graph)).await?;
 
         loop {
+            // Edits held back go anyway when they have waited long enough.
+            let deadline = self.gate().deadline;
+            let due = async {
+                match deadline {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            };
             let read = async {
                 match idle {
                     Some(d) => tokio::time::timeout(d, recv.read(&mut buf)).await.ok(),
@@ -320,7 +440,7 @@ impl Peer {
                         }
                     }
                 }
-                changed = changes.changed() => {
+                changed = publish.changed() => {
                     if changed.is_err() {
                         return Ok(());
                     }
@@ -328,9 +448,20 @@ impl Peer {
                         write(&mut send, &message).await?;
                     }
                 }
+                changed = gate_changes.changed() => {
+                    // Only the deadline moved: loop to read it again.
+                    if changed.is_err() {
+                        return Ok(());
+                    }
+                }
+                () = due => self.publish_if_due(),
             }
         }
     }
+}
+
+fn bump(counter: &watch::Sender<u64>) {
+    counter.send_modify(|n| *n = n.wrapping_add(1));
 }
 
 async fn write(send: &mut SendStream, message: &Message) -> Result<(), Error> {
