@@ -48,6 +48,17 @@ description = "Build the desktop app for release"
 depends = ["setup", "doctor"]
 run = "pnpm app build"
 
+[tasks.docs]
+description = "Build the documentation site (the UI showing docs/) into apps/ui/out"
+depends = ["setup", "doctor"]
+# The scratch graph is rebuilt each time so that removed pages don't linger.
+run = """
+rm -rf target/docs-graph
+cargo run -p quiddity-node -- -g target/docs-graph init
+cargo run -p quiddity-node -- -g target/docs-graph import docs
+QUIDDITY_STATIC_GRAPH=$PWD/target/docs-graph pnpm ui build
+"""
+
 [tasks.node]
 description = "Run quiddity-node, the command line and headless sync node: mise run node -- --help"
 run = "cargo run -p quiddity-node --"

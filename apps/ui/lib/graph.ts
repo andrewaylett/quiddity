@@ -224,9 +224,11 @@ export function bootGraph(): Promise<Graph> {
   booted ??= (async () => {
     await init();
     const inTauri = "__TAURI_INTERNALS__" in window;
-    const backend: Backend = inTauri
-      ? (await import("./backend-tauri")).tauriBackend
-      : (await import("./backend-memory")).memoryBackend;
+    const backend: Backend = process.env.NEXT_PUBLIC_QUIDDITY_STATIC_GRAPH
+      ? (await import("./backend-static")).staticBackend
+      : inTauri
+        ? (await import("./backend-tauri")).tauriBackend
+        : (await import("./backend-memory")).memoryBackend;
     const graph = new Graph(new Replica(await backend.load()), backend);
     graph.ensureToday();
     // Making today's page isn't the user's doing, so it isn't theirs to undo.

@@ -238,7 +238,7 @@ function Canvas() {
         const { view, router } = latest.current;
         router.push(aside ? view.toSide(id) : view.toMain(id));
       },
-      (id) => latest.current.view.toMain(id),
+      (id) => process.env.NEXT_PUBLIC_QUIDDITY_BASE_PATH + latest.current.view.toMain(id),
     );
     return () => {
       drawing.current?.stop();
