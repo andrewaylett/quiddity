@@ -4,9 +4,18 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue re-runs the checks on the PR merged with whatever is ahead
+  # of it. Mutation testing and fuzzing are skipped there: the PR has already
+  # passed them, and neither depends on what it's merged with.
+  merge_group:
 
 permissions:
   contents: read
+
+# A new push supersedes the PR's previous run. Queue and main runs always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,19 +25,14 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+    - uses: $/.github/actions/setup
       with:
-        toolchain: stable
-        components: rustfmt, clippy
-    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        tools: cargo-binstall rust cargo:cargo-nextest
     - run: cargo fmt --all --check
     - run: cargo clippy --all-targets --locked
-    - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
-      with:
-        tool: cargo-nextest
     - run: cargo nextest run --locked --profile ci
     - run: cargo test --doc --locked
     - run: cargo doc --no-deps --locked
@@ -38,28 +42,30 @@ jobs:
   ui:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+    # The UI embeds the graph replica, which is the core compiled to WASM, so
+    # it needs the wasm-bindgen CLI that mise.toml pins to the crate's version.
+    - uses: $/.github/actions/setup
       with:
-        node-version: 22
-        cache: pnpm
-    # The UI embeds the graph replica, which is the core compiled to WASM. The
-    # CLI's version must match the wasm-bindgen crate's, which is pinned.
-    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      with:
-        toolchain: stable
-        targets: wasm32-unknown-unknown
-    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-    - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
-      with:
-        tool: wasm-bindgen@0.2.129
+        tools: cargo-binstall rust node pnpm cargo:wasm-bindgen-cli
+        node: true
     - run: pnpm install --frozen-lockfile
     - run: pnpm ui typecheck
     - run: pnpm ui build
-    - run: pnpm --filter @quiddity/ui exec playwright install --with-deps chromium
+    - id: playwright
+      run: echo "version=$(pnpm --filter @quiddity/ui exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+    - id: browsers
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+    - if: steps.browsers.outputs.cache-hit != 'true'
+      run: pnpm --filter @quiddity/ui exec playwright install --with-deps chromium
+    # The browser is cached, but the system libraries it needs are not.
+    - if: steps.browsers.outputs.cache-hit == 'true'
+      run: pnpm --filter @quiddity/ui exec playwright install-deps chromium
     - run: pnpm ui test:e2e
     - if: failure()
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -70,54 +76,47 @@ jobs:
   app:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
     - run: >-
-        sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
-    - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        sudo apt-get update && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
+    # The WASM build the UI needs for the shell goes through mbx.
+    - uses: $/.github/actions/setup
       with:
-        node-version: 22
-        cache: pnpm
-    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      with:
-        toolchain: stable
-        components: rustfmt, clippy
-        targets: wasm32-unknown-unknown
+        tools: cargo-binstall rust node pnpm cargo:wasm-bindgen-cli
+        node: true
+    # The shell itself does not: built through mbx, tauri's macros can't find
+    # its permissions ("failed to resolve ACL: SetPermissionNotFound"). It is
+    # the expensive build, so it keeps rust-cache.
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
-        workspaces: |
-          .
-          apps/app/src-tauri
-    - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
-      with:
-        tool: wasm-bindgen@0.2.129
+        workspaces: apps/app/src-tauri
+        save-if: ${{ github.ref == 'refs/heads/main' }}
     - run: pnpm install --frozen-lockfile
     # The shell embeds the built UI.
     - run: pnpm ui build
     - working-directory: apps/app/src-tauri
+      env:
+        MBX_DISABLE: 1
       run: |
         cargo fmt --check
         cargo clippy --all-targets --locked
         cargo test --locked
 
   mutants:
-    # Every mutant in the lines a PR changes must be caught by some test.
+    # Every mutant in the lines a PR changes must be caught by some test. There
+    # is no diff to mutate on a push, and the merge queue relies on the PR's run.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 0
         persist-credentials: false
-    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+    - uses: $/.github/actions/setup
       with:
-        toolchain: stable
-    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-    - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
-      with:
-        tool: cargo-nextest,cargo-mutants
+        tools: cargo-binstall rust cargo:cargo-nextest cargo:cargo-mutants
     - run: git diff "origin/${GITHUB_BASE_REF}..." > pr.diff
     - run: cargo mutants --in-diff pr.diff --no-shuffle -j 2 --timeout-multiplier 3
       env:
@@ -129,28 +128,26 @@ jobs:
         path: mutants.out/
 
   fuzz:
+    # Continuous fuzzing of the PR and of main; the merge queue adds nothing.
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         target: [block, outline, peer]
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
+    - uses: $/.github/actions/setup
       with:
-        toolchain: nightly
-    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      with:
-        workspaces: fuzz
-    - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
-      with:
-        tool: cargo-fuzz
-    # The prebuilt cargo-fuzz otherwise targets musl, which isn't installed.
+        tools: cargo-binstall rust cargo:cargo-fuzz
+        cargo-workspace: fuzz
+    - run: rustup toolchain install nightly --profile minimal
     - run: mkdir -p fuzz/corpus/${{ matrix.target }}
+    # The prebuilt cargo-fuzz otherwise targets musl, which isn't installed.
     - run: >-
-        cargo fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} fuzz/corpus/${{ matrix.target }} fuzz/seeds/${{ matrix.target }} -- -max_total_time=60
+        cargo +nightly fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} fuzz/corpus/${{ matrix.target }} fuzz/seeds/${{ matrix.target }} -- -max_total_time=60
     - if: failure()
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
