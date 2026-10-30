@@ -13,3 +13,5 @@
 	- A compacted replica cannot update a peer behind where its history starts: the updates would never apply.
 	- A compacted replica refuses edits made on the history it dropped.
 - A device that is silent for 30 days stops holding compaction back. If it returns with edits made on dropped history, they cannot be applied; what to do for it is an open question.
+- Devices
+	- The same list says who may connect. Authorising a device is a graph edit. [[Device list]]
