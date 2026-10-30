@@ -43,6 +43,12 @@ Each device keeps only the history some device might still need: what
 every device has stored, as far as it knows. A device silent for 30 days
 stops holding that back.
 
+## The documentation site
+
+`docs/` is itself a graph. CI imports it with `quiddity-node` and builds the UI
+around the result, then publishes that to GitHub Pages. `mise run docs` does
+the same locally, into `apps/ui/out`.
+
 ## The app
 
 With [mise](https://mise.jdx.dev) the whole thing is one command in a fresh
