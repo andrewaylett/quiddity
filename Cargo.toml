@@ -7,7 +7,7 @@ exclude = ["fuzz", "apps/app/src-tauri"]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-repository = "https://github.com/andrewaylett/quiddity"
+repository = "https://github.com/quiddity-app/quiddity"
 rust-version = "1.88"
 
 [workspace.dependencies]
