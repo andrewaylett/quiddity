@@ -156,3 +156,16 @@ jobs:
       with:
         name: fuzz-${{ matrix.target }}
         path: fuzz/artifacts/
+
+  fuzz-gate:
+    # The one fuzzing check to require. The matrix legs only exist when `fuzz`
+    # runs, so requiring them by name would hang the merge queue, where it is
+    # skipped. `always()` stops a failed `fuzz` skipping this job, which would
+    # count as a pass.
+    if: always()
+    needs: fuzz
+    runs-on: ubuntu-latest
+    steps:
+    - env:
+        RESULT: ${{ needs.fuzz.result }}
+      run: test "$RESULT" = success || test "$RESULT" = skipped
