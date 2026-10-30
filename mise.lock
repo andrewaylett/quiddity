@@ -65,9 +65,9 @@ backend = "cargo:cargo-nextest"
 specifiers = ["0.9.150"]
 
 [[tools."cargo:wasm-bindgen-cli"]]
-version = "0.2.129"
+version = "0.2.130"
 backend = "cargo:wasm-bindgen-cli"
-specifiers = ["0.2.129"]
+specifiers = ["0.2.130"]
 
 [[tools.emsdk]]
 version = "6.0.13"

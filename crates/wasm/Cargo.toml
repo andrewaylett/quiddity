@@ -17,7 +17,7 @@ quiddity-core.workspace = true
 quiddity-view = { path = "../view" }
 serde = "1"
 serde-wasm-bindgen = "0.6"
-wasm-bindgen = "=0.2.129"
+wasm-bindgen = "=0.2.130"
 
 # The core makes block ids with uuid, which needs a source of randomness
 # where there is no operating system.
