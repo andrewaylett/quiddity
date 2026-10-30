@@ -1,5 +1,13 @@
 import init, { Replica } from "./wasm/quiddity_wasm";
-import type { Connections, Entity, EntityId, EntityRef, Merged, Reference } from "./model";
+import type {
+  Connections,
+  Entity,
+  EntityId,
+  EntityRef,
+  Merged,
+  Reference,
+  TitleHit,
+} from "./model";
 
 /** Where the graph lives: the Tauri shell, or memory for plain-browser dev. */
 export interface Backend {
@@ -85,6 +93,11 @@ export class Graph {
     this.read<Reference[]>(`r:${id}`, () => this.replica.references(id));
   unlinkedReferences = (id: EntityId) =>
     this.read<Reference[]>(`u:${id}`, () => this.replica.unlinkedReferences(id));
+
+  /** Entities whose titles match `query`, best first. Not kept: a query is
+   * rarely asked twice, and the answer needn't be stable between edits. */
+  searchTitles = (query: string, limit: number) =>
+    this.replica.searchTitles(query, limit) as TitleHit[];
 
   /** A block's text as it is now, which a rendered view may lag behind. */
   blockText = (id: string) => this.replica.blockText(id);

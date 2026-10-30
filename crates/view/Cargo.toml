@@ -13,5 +13,8 @@ quiddity-core.workspace = true
 serde = { version = "1", features = ["derive"] }
 thiserror.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true

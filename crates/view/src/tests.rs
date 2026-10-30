@@ -14,7 +14,7 @@ fn today() -> Date {
 }
 
 /// A view on a graph that `build` has filled.
-fn view_with(build: impl FnOnce(&Graph)) -> View {
+pub(crate) fn view_with(build: impl FnOnce(&Graph)) -> View {
     let graph = Graph::new();
     build(&graph);
     graph.commit();

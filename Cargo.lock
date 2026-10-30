@@ -3155,6 +3155,7 @@ name = "quiddity-view"
 version = "0.1.0"
 dependencies = [
  "jiff",
+ "proptest",
  "quiddity-core",
  "serde",
  "thiserror 2.0.21",

@@ -86,6 +86,12 @@ impl Replica {
         js(&self.view.entities()?)
     }
 
+    /// Entities whose titles match `query`, best first.
+    #[wasm_bindgen(js_name = searchTitles)]
+    pub fn search_titles(&self, query: &str, limit: usize) -> Result<JsValue, JsError> {
+        js(&self.view.search_titles(query, limit)?)
+    }
+
     /// Every entity and the links between them, for drawing as a graph.
     pub fn connections(&self) -> Result<JsValue, JsError> {
         js(&self.view.connections()?)

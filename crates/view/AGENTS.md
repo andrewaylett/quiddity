@@ -94,6 +94,17 @@ that entity's id (found by name as `Index::property_entity` does) or `None`, and
 `define_property(key)` makes one, a property entity with an empty block, when
 there is none. Like a link to nowhere, the UI makes it on following.
 
+## Search
+
+`fuzzy_match(query, name)` is the one matcher: characters in order, ignoring
+case, but **a capital must start a word (or be that same capital)** and so must
+anything typed after a space, as an IDE's "go to" does. Of the possible
+alignments the best scoring wins (adjacent runs, word starts and the start of
+the name count for more). Its ranges are UTF-16 units, for highlighting.
+`search_titles` runs it over every entity's title. Whitespace in a query is
+never matched itself. Tests use the weights by name, so retuning them doesn't
+break the tests; the ranking tests are the ones to read when changing them.
+
 ## Tests
 
 `tests.rs` builds graphs in memory with `view_with` and `page`. The queries,
