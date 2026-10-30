@@ -17,6 +17,7 @@ use quiddity_core::{BlockId, Graph, Index};
 pub use edit::Merged;
 pub use query::{
     Block, Connections, Edge, Entity, EntityRef, LinkTarget, Property, PropertyValue, Reference,
+    Summary,
 };
 
 #[derive(Debug, thiserror::Error)]
