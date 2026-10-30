@@ -105,6 +105,15 @@ the name count for more). Its ranges are UTF-16 units, for highlighting.
 never matched itself. Tests use the weights by name, so retuning them doesn't
 break the tests; the ranking tests are the ones to read when changing them.
 
+`search_text` (`fts.rs`) is full-text search over block text: words are runs
+of letters and digits, compared ignoring case; a block is found when every
+query word matches one of its words, **the last also as a prefix** (the query
+is usually still being typed). Blocks are ranked by BM25 with a bonus when a
+multi-word query's words are together and in order. **It reads every block on
+every query** (no inverted index yet), like an index rebuild; an inverted
+index kept beside `Index` is the next step if that gets slow. Entity names
+aren't text: `search_titles` has them.
+
 ## Tests
 
 `tests.rs` builds graphs in memory with `view_with` and `page`. The queries,

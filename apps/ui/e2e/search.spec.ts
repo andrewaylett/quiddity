@@ -43,3 +43,23 @@ test("arrows choose, Shift-Enter opens at the side, Escape closes", async ({ pag
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
+
+test("text search finds blocks by their words, and opens the page they are on", async ({ page }) => {
+  await page.goto("/");
+  await page.keyboard.press("Control+k");
+  // Order doesn't matter, and the last word may be unfinished.
+  await page.getByRole("combobox").fill("crdts note");
+  const text = page.getByRole("group", { name: "Text" });
+  const hit = text.getByRole("option").first();
+  await expect(hit).toContainText("Notes on loro and other CRDTs");
+  await expect(hit.locator("mark")).toHaveText(["Notes", "CRDTs"]);
+  await hit.click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Reading list");
+});
+
+test("a word that is nowhere finds nothing", async ({ page }) => {
+  await page.goto("/");
+  await page.keyboard.press("Control+k");
+  await page.getByRole("combobox").fill("loro zzzz");
+  await expect(page.getByText("Nothing found.")).toBeVisible();
+});

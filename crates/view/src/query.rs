@@ -171,7 +171,7 @@ impl View {
         Ok(self.index()?.canonical(id))
     }
 
-    fn entity_ref(&self, id: BlockId) -> Result<EntityRef> {
+    pub(crate) fn entity_ref(&self, id: BlockId) -> Result<EntityRef> {
         Ok(EntityRef {
             id: id.to_string(),
             title: self.graph.entity_name(id)?,
