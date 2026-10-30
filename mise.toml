@@ -8,6 +8,12 @@ pinact = "5.0.2"
 # Must match the wasm-bindgen crate, which crates/wasm pins.
 "cargo:wasm-bindgen-cli" = "0.2.129"
 emsdk = "6.0.13"
+# What CI and the testing in AGENTS.md run. cargo-binstall makes mise fetch
+# these prebuilt rather than compile them.
+cargo-binstall = "1.26.1"
+"cargo:cargo-nextest" = "0.9.150"
+"cargo:cargo-mutants" = "27.1.0"
+"cargo:cargo-fuzz" = "0.13.2"
 
 # `mise run <task>`; `mise tasks` lists them. `mise trust` once in a fresh
 # checkout, so that mise will read this file.
