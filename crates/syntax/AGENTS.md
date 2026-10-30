@@ -23,6 +23,13 @@ The reference parser and formatter for block text: `key:: value` lines,
 - **References come from structure.** Links and block refs in a value count
   at the top level or in a list, but not inside quoted text or qualifiers.
   `Refs` collects them the same way for inline and line properties.
+- **An inline property's value is read from its own text.** Nested links can
+  read past the closing `)` and be settled by what follows it, so after the
+  first reading finds where the value ends, `inline_value` reads that text
+  again until it reads as exactly itself. Without it, a stray `]]` after a
+  property could change what the property meant (the `block` fuzz target's
+  "each property can be parsed from its span alone"). A value that is
+  malformed on its own ends up shorter, down to a bare `#key`.
 - **`#key` alone on a line is `key::`.** `parse_property_line` (and so
   `is_properties_block`) accepts it, and `format_property_line` writes a
   property with no value that way. `parse_block` still reads it as an inline

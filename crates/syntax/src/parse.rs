@@ -221,17 +221,9 @@ fn scan_inline(line: &str, offset: usize, tags: bool, block: &mut Block) {
             {
                 sc.pos += 1;
                 if let Some(key) = parse_key(&mut sc) {
-                    let mut refs = Refs::default();
-                    let value = match sc.peek() {
-                        Some('(') => match parse_paren_value(&mut sc, &mut refs) {
-                            Some(value) => {
-                                refs.add_to(block);
-                                value
-                            }
-                            None => None,
-                        },
-                        _ => None,
-                    };
+                    let (value, refs, len) = inline_value(&line[sc.pos..]);
+                    refs.add_to(block);
+                    sc.pos += len;
                     block.properties.push(Property {
                         key,
                         value,
@@ -246,6 +238,39 @@ fn scan_inline(line: &str, offset: usize, tags: bool, block: &mut Block) {
         }
         prev = line[..sc.pos].chars().next_back();
     }
+}
+
+/// The `(value)` after an inline property's key at the start of `rest`, if it
+/// has a well-formed one: the value, the links and block refs in it, and how
+/// much of `rest` it takes.
+///
+/// A value is read from its own text alone. Reading nested links can run past
+/// the closing parenthesis and be settled by what follows it, so the first
+/// reading only says where the value ends; the text up to there is read again
+/// until it reads as exactly itself. What follows a property then can't change
+/// what the property means.
+fn inline_value(rest: &str) -> (Option<Value>, Refs, usize) {
+    fn read(rest: &str) -> (Option<Value>, Refs, usize) {
+        let mut sc = Scanner::new(rest);
+        let mut refs = Refs::default();
+        match sc.peek() {
+            Some('(') => match parse_paren_value(&mut sc, &mut refs) {
+                Some(value) => (value, refs, sc.pos),
+                None => (None, Refs::default(), 0),
+            },
+            _ => (None, refs, 0),
+        }
+    }
+    /// Reads `rest[..len]` until what it reads takes all of it.
+    fn settle(rest: &str, len: usize) -> (Option<Value>, Refs, usize) {
+        let (value, refs, took) = read(&rest[..len]);
+        if took == len {
+            (value, refs, len)
+        } else {
+            settle(rest, took)
+        }
+    }
+    settle(rest, read(rest).2)
 }
 
 /// Whether an inline property ends exactly at `pos`, so that `#a(1)#b(2)`
@@ -681,6 +706,18 @@ mod tests {
                 prop("due date", Some(text("2026-10-25"))),
             ]
         );
+    }
+
+    #[test]
+    fn a_property_does_not_depend_on_what_follows_it() {
+        // Found by fuzzing. Nested links read past the closing parenthesis, and
+        // the `]]` after it completed one that the property's own text leaves
+        // open, so the property alone meant something else.
+        let text = "#s([[k#s([[t#s([[k#r(([[]])]])]]";
+        let all = parse_block(text).properties;
+        assert_eq!(all.len(), 1);
+        let alone = parse_block(&text[all[0].span.clone()]).properties;
+        assert_eq!((alone.len(), &alone[0].value), (1, &all[0].value));
     }
 
     #[test]
