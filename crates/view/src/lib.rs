@@ -9,6 +9,7 @@
 mod edit;
 mod links;
 mod query;
+mod search;
 
 use std::cell::{Cell, Ref, RefCell};
 
@@ -18,6 +19,7 @@ pub use edit::Merged;
 pub use query::{
     Block, Connections, Edge, Entity, EntityRef, LinkTarget, Property, PropertyValue, Reference,
 };
+pub use search::{Match, TitleHit, fuzzy_match};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

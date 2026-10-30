@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 
 /**
- * Three panes. The shell itself knows nothing about the URL, so it can render
+ * Three panes, with an action strip above the main one. The shell itself knows nothing about the URL, so it can render
  * (and be prerendered) without waiting on anything; each pane is handed in
  * already wrapped in its own boundary.
  *
@@ -14,10 +14,13 @@ import { useState, type ReactNode } from "react";
 export function Shell({
   left,
   right,
+  actions,
   children,
 }: {
   left: ReactNode;
   right: ReactNode;
+  /** The strip's controls, at its right-hand end. */
+  actions: ReactNode;
   children: ReactNode;
 }) {
   const [drawer, setDrawer] = useState(false);
@@ -42,16 +45,19 @@ export function Shell({
         />
       )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-700 md:hidden">
+        <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-700">
           <button
             type="button"
             aria-label="Open navigation"
-            className="rounded px-2 py-1 hover:bg-slate-200 dark:hover:bg-slate-700"
+            className="rounded px-2 py-1 hover:bg-slate-200 dark:hover:bg-slate-700 md:hidden"
             onClick={() => setDrawer(true)}
           >
             ☰
           </button>
-          <span className="font-semibold">Quiddity</span>
+          <span className="font-semibold md:hidden">Quiddity</span>
+          <div role="toolbar" aria-label="Actions" className="ml-auto flex items-center gap-2">
+            {actions}
+          </div>
         </div>
         <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
       </div>

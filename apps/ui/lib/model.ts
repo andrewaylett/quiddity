@@ -71,3 +71,11 @@ export interface Reference {
   blocks: Block[];
   links: Record<string, LinkTarget>;
 }
+
+/** An entity whose title matched a search. */
+export interface TitleHit {
+  entity: EntityRef;
+  score: number;
+  /** The matched text in the title, as ascending `[start, end)` runs of UTF-16 units. */
+  ranges: [number, number][];
+}

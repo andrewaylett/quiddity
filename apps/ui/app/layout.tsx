@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/boundary";
 import { ClientOnly } from "@/components/client-only";
 import { LeftSidebar } from "@/components/left-sidebar";
 import { RightPane } from "@/components/right-pane";
+import { Search } from "@/components/search";
 import { Shell } from "@/components/shell";
 import { UndoKeys } from "@/components/undo-keys";
 
@@ -33,6 +34,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </Suspense>
         </ClientOnly>
         <Shell
+          actions={
+            <ClientOnly>
+              <Suspense fallback={null}>
+                <Search />
+              </Suspense>
+            </ClientOnly>
+          }
           left={
             <ClientOnly fallback={<Skeleton className="m-4 h-4 w-3/4" />}>
               <Suspense fallback={<Skeleton className="m-4 h-4 w-3/4" />}>

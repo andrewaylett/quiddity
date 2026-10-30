@@ -95,6 +95,26 @@ shift-click opens it at the side) and are labelled by `aria-label`.
   entities that have gone are dropped when next saved.
 - Dragging lets go on release (nodes aren't pinned).
 
+## Search
+
+The action strip above the main pane holds the search button; **Cmd/Ctrl-K**
+(captured, so a focused editor can't take it) opens the panel
+(`components/search.tsx`).
+
+- **A panel is a list of `Facet`s** (`lib/search/facet.ts`), one section each,
+  in order. A facet is `search(query, graph) => Hit[] | Promise<Hit[]>`, best
+  first. `useSearch` runs them independently and keeps each one's latest
+  answer, so a slow facet (full text, embeddings) never holds up a fast one
+  and an old answer stays until its replacement arrives.
+- **Make new facets by composing**: `limited(n, facet)`, `when(applies, facet)`
+  (a prefix such as `>` that selects actions, say). A hit's `target` is data
+  (`entity`, or `run`), not a callback, so hits can be ranked and logged later.
+- **Matching lives in Rust** (`quiddity-view`'s `search.rs`, where it is
+  mutation-tested), reached through `graph.searchTitles`. Facets only shape
+  its answers into hits.
+- The graph's `searchTitles` isn't cached: the panel asks per keystroke and
+  an answer is rarely wanted twice.
+
 ## Rendering
 
 `RenderedBlock` is how a block reads when not being edited: `splitBlock` takes
