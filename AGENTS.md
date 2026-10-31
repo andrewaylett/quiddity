@@ -25,6 +25,22 @@ British English, in code, comments, docs and commit messages. Comments
 explain what isn't obvious from the code; doc comments say what a thing is
 for.
 
+## Documentation
+
+`docs/` is a graph in Quiddity's own format, and CI publishes it to GitHub
+Pages as the UI showing its own documentation (see
+[Publishing](docs/Publishing.md)). Keep it current as you change things:
+
+- **Update the pages a change affects in the same commit.** A page per topic,
+  named for the topic (`docs/Static build.md`), linking to related pages with
+  `[[double brackets]]`. A page that is no longer true is worse than none.
+- **Add a journal entry** in `docs/journals/YYYY-MM-DD.md` for the day's work,
+  or add to the day's entry if it exists: what changed and why, and what the
+  next person should know, linking to the pages it touches. The format is the
+  Markdown outline of the text export: `- ` bullets, children indented with a
+  tab.
+- Check it imports and builds with `mise run docs`.
+
 ## Testing
 
 Tests should be useful, not numerous: check each behaviour once, at the

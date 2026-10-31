@@ -1,0 +1,14 @@
+- How the UI is built around a graph on disk, rather than for the desktop app.
+- The gate is `QUIDDITY_STATIC_GRAPH`, read by `apps/ui/next.config.ts` at build time.
+	- It names a graph directory, as made by `quiddity-node`.
+	- The directory's `graph.loro` is copied into `public/`, so it is published beside the pages.
+	- `NEXT_PUBLIC_QUIDDITY_STATIC_GRAPH` is set to match, so the choice is made when the bundle is built and not when it runs.
+- With it set, the UI loads its replica from that file (`backend-static.ts`) instead of asking the Tauri shell (`backend-tauri.ts`) or building a made-up graph (`backend-memory.ts`).
+- Without it nothing changes: the desktop app's build has no snapshot and the static backend is not in the bundle.
+- `QUIDDITY_BASE_PATH` is where the site is served from, such as `/quiddity` on GitHub Pages.
+	- `Link` and the router add it themselves.
+	- Anything that writes an `href` by hand has to, and the graph view's nodes do.
+- Limits
+	- The graph only exists in the browser, so the pages are a shell until the snapshot has loaded.
+	- Nothing is saved: the backend discards edits, so a reload starts again from the published graph.
+- See [[Publishing]] for how CI uses this, and [[design]] for the UI model.

@@ -1,7 +1,8 @@
 - This site is built by CI from the Markdown in `docs/`.
 	- `quiddity-node` creates a graph and imports `docs/` into it.
-	- The UI is built with `QUIDDITY_STATIC_GRAPH` pointing at that graph, which makes it load the graph's snapshot instead of talking to the Tauri shell.
+	- The UI is built with `QUIDDITY_STATIC_GRAPH` pointing at that graph, which makes it load the graph's snapshot instead of talking to the Tauri shell. [[Static build]] has the details.
 	- `QUIDDITY_BASE_PATH` is where the site is served from.
 - Without `QUIDDITY_STATIC_GRAPH` the build is the one the desktop app embeds, unchanged.
 - To build it yourself, run `mise run docs`; the site lands in `apps/ui/out`.
+- Adding to this site is a matter of adding Markdown to `docs/`: a page per topic, and a journal entry in `docs/journals/` for each day's work.
 - Back to [[Quiddity]].
