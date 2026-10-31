@@ -1,0 +1,19 @@
+- Typing is saved at once, but not sent to devices that cannot see it. [[Presence]]
+	- Sending every keystroke is wasted effort when nobody else has the block open.
+- `Peer::edited(block)` reports a local edit to a block's text.
+	- It is sent now if another device has that block open.
+	- Otherwise it waits, with whatever follows, until the edit is over.
+- An edit ends when any of these happens.
+	- 2 s pass without another edit (`Peer::set_edit_idle` changes this).
+	- This device moves to another block (`Peer::set_focus`).
+	- `Peer::end_edit` is called, or anything else calls `Peer::changed`, which sends everything.
+	- Another device opens the block.
+- The history is untouched. Loro keeps every op however often it is published, so time travel is unaffected: only when peers hear about an edit changes.
+- Things worth knowing
+	- A device's op log is linear, so a publish sends everything up to that point, not only the watched block. The gate asks whether any block with a held edit is watched.
+	- A new connection's hello still sends everything, held edits included, so a device that joins is never behind.
+	- Saving is never held back. "The graph changed" (`Peer::subscribe`, which drives saving) and "send the changes" are separate signals.
+	- The timers live in the connection tasks, so `Peer` needs no runtime of its own.
+- Not wired yet
+	- Nothing calls `edited` or `set_focus` from the app. The UI runs `View` in the browser and the shell holds the native graph, so the UI will report edits and focus to the shell with commands. [[design]]
+- Tests run real iroh connections on localhost: idle release, a watched block, a block that becomes watched, moving away, and ending the edit. [[Testing]]

@@ -129,7 +129,9 @@ Properties are written in two ways, both parsed from the text:
 
 - **Property lines**, as in Logseq's original format: `key:: value` on a line
   of its own. A key starts with a letter, digit or underscore, may contain
-  spaces, and may not contain `:`, `#`, brackets or parentheses.
+  spaces, and may not contain `:`, `#`, brackets or parentheses. A line
+  that is only `#key` is the same property without a value, and is how one
+  is written: `#flag`, not `flag::`.
 - **Inline properties**, anywhere in running text: `#key` or `#key(value)`.
 
 A block's **type** is the value of its `type` property.

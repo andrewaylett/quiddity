@@ -6,5 +6,7 @@ favourite:: true
 	- Follow a link, shift-click one to open it at the side, or try the Graph view.
 - Where to start
 	- [[design]]: the design, from the data model to sync.
+	- [[Presence]], [[Publish gate]] and [[Compaction]]: how devices know who is here, what they send each other, and what they keep.
+	- [[Testing]]: how the code is tested, from properties to mutants.
 	- [[Publishing]]: how this site gets built, and [[Static build]], what that asks of the UI.
 	- The journals: a short entry for each day's work.
