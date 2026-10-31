@@ -1,0 +1,20 @@
+- Tests should be useful, not numerous: each behaviour is checked once, at the layer that owns it. [[Compaction]]
+- Each layer is tested on its own.
+	- `cargo mutants` runs each mutant against its own crate's tests only, so a crate cannot lean on another crate's tests.
+	- CI runs it over the lines each pull request changes, and nothing may be missed.
+- Property tests come first.
+	- Generators are weighted towards the inputs that matter, such as the characters a parser treats specially, so a few dozen cases find the edges.
+	- A handful of named examples cover what a generator is unlikely to hit.
+	- Failures that proptest finds are kept in `*.proptest-regressions` files and replayed.
+- Whole systems are simulated.
+	- Sync runs sessions over a network that connects, disconnects and delivers in a scrambled order. [[Presence]]
+	- Each simulation caught a real design flaw before it shipped: compacting before catching up, a creator missing from the device list, gossip that forgot records.
+- Fuzzing covers arbitrary input: nothing panics, and formatting reaches a fixed point.
+	- Targets are `block`, `outline` and `peer`. A crash becomes a seed and a regression test in the crate it is about.
+- When a mutant survives
+	- If it changes behaviour, add the test that notices. Usually that is a stronger property or a better-weighted generator, not one more example.
+	- If it cannot change behaviour, the code is redundant: simplify it. A guard that the next check already implies went this way.
+	- Only if neither applies, exclude it in `.cargo/mutants.toml`, with the reason beside it.
+- A timeout counts as caught but costs the run time, so look for a fast failure first.
+- Check that a new test fails without the fix before trusting it.
+- `cargo nextest run` is the suite. It has profiles for CI and for mutants, where the first failing test ends the run.

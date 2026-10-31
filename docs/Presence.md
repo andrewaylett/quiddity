@@ -1,0 +1,22 @@
+- Who else is here, and which blocks they have open. It is what lets a device decide whether anyone can see what it is typing. [[Publish gate]]
+- It is ephemeral, so it is not in the graph.
+	- A graph's Loro document keeps history, and a cursor that moves every second has no business in it: it would be stored, synced to offline devices and compacted for ever. [[Compaction]]
+	- It lives in `crates/sync` (`Presence`), as small messages with no history.
+- Each device owns one record.
+	- `device`, the blocks it has open (`focus`), and the devices it holds a connection to (`peers`).
+	- Records are ordered by (`epoch`, `seq`). `seq` rises with each change, and `epoch` is chosen at start-up, so a restarted device outranks its past self whatever sequence number it has forgotten.
+- Records travel on the sync connection, as `Message::Presence`, not on a second ALPN.
+	- The connections are what define the network presence gossips over.
+	- Peers that predate the message ignore it, as they do any unknown type.
+	- The node routes it between connections, because presence belongs to the device and not to one connection. A connection becomes a link once the peer's hello has arrived, and is withdrawn when its task ends, however it ends.
+- Gossip works like update sync: each link remembers what its peer has been told, and sends the live records it lacks. [[design]]
+	- Forwarding only what was news did not work. A neighbour that already held a record never passed it on, so a device that had forgotten it, or never had it, never heard it again. A simulation found that.
+- A device is live if it is reachable over links that both ends list.
+	- A device that drops cuts off whatever hung from it, even if it never says so: its neighbours stop listing it.
+	- One end's claim is not enough. A crashed device's last record still lists its neighbour, and would keep it alive if it counted alone.
+	- There are no timeouts of ours. A device that vanishes is noticed when iroh gives up on its connection (keepalive every 5 s, then the idle timeout).
+- Records of devices that are no longer live are kept, one per device. They cost little, and forgetting them is what lost records.
+- Limits
+	- Epochs come from the clock, so a clock set back can leave a restarted device's records ignored until it catches up.
+	- Presence says where a device is, not what it is doing there: there are no cursors or selections yet.
+- The simulation in `crates/sync/tests/presence.rs` connects, drops, crashes and restarts devices, scrambles delivery and loses messages in flight. After each step, every device must know exactly the devices it can reach, and where they are. [[Testing]]

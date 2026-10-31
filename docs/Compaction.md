@@ -1,0 +1,15 @@
+- Live edits go to online peers in full detail, but the stored history is compacted. The reasoning is in [[design]], under "Live edits versus stored history".
+- Every device follows the same rule; none is special, the headless node included.
+	- Each device records in the graph what it has durably stored. That is the device list.
+	- A device compacts at what every active device has stored, once it holds everything any of them has stored.
+	- The device that creates a graph records itself from the start, and a device vouches for each newcomer it gives the graph to.
+- It is implemented in layers.
+	- `crates/core`: shallow snapshots, `Graph::compaction_point`, and refusing what a compacted replica cannot do.
+	- `crates/sync`: the hello says where history starts, and a blank peer is sent a snapshot. A side behind the other's history is told so. [[Presence]]
+	- `crates/node`: saving records the device and writes a compacted snapshot. `quiddity-node devices` lists the devices.
+- Things Loro does that the code has to work around
+	- Updates whose causes are missing are held, silently. Exporting from a version the receiver does not have appears to import nothing.
+	- A document that has imported anything, even an empty snapshot, ignores a compacted snapshot, silently. So `from_snapshot` skips an empty import, and `import` checks that what it imported shows in the version.
+	- A compacted replica cannot update a peer behind where its history starts: the updates would never apply.
+	- A compacted replica refuses edits made on the history it dropped.
+- A device that is silent for 30 days stops holding compaction back. If it returns with edits made on dropped history, they cannot be applied; what to do for it is an open question.
