@@ -3,5 +3,32 @@
   "extends": [
     "config:recommended",
     "github>andrewaylett/renovate-config"
+  ],
+  "customManagers": [
+    {
+      "description": "The wasm-bindgen CLI that taiki-e/install-action fetches in a workflow",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "tool: wasm-bindgen@(?<currentValue>\\S+)"
+      ],
+      "depNameTemplate": "wasm-bindgen",
+      "datasourceTemplate": "crate"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "The wasm-bindgen crate and CLI must match exactly, so bump every pin together",
+      "matchDatasources": [
+        "crate"
+      ],
+      "matchDepNames": [
+        "wasm-bindgen",
+        "wasm-bindgen-cli"
+      ],
+      "groupName": "wasm-bindgen"
+    }
   ]
 }
